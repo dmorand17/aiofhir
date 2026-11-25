@@ -84,7 +84,7 @@ These are the SMART configuration fields, not the FHIR `/metadata` CapabilitySta
 - [x] `tests/test_import.py` confirms `import aiofhir` loads no `livekit` or `fastapi`. It passed locally.
 
 **Phase 1: Build the core (2.5 d).** Left off after the failing tests. `src/aiofhir` is still only `__init__.py`.
-- [ ] GitHub Actions is green on this branch.
+- [x] GitHub Actions is green on this branch.
 - [ ] Reserve the PyPI name `aiofhir`.
 - [ ] **Discovery:** fallback paths come from the profile; S256 is required; results are cached.
   - *Tests:* Haste returns 404 on the primary path and 200 on the fallback; every path failing raises `DiscoveryError`.
