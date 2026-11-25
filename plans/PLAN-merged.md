@@ -3,7 +3,7 @@
 `aiofhir` is a thin **async FHIR R4 and SMART on FHIR client** for Python, built on httpx. It handles patient sign-in (`aiofhir.smart`), reading and searching, and patient-scoped helpers that return compact, cited summaries. It has **no LiveKit dependency**. LiveKit tools live in each demo repo.
 
 - **Why async httpx:** LiveKit agents run on asyncio, so a blocking client would stall the event loop during FHIR calls and token refreshes. httpx gives pooling, timeouts, HTTP/2 and a mockable transport (respx).
-- **Status:** pre-release. Phase 0 and Phase 1 are complete on `cursor/phase-1-client`. The PyPI name is reserved as 0.0.0. Nothing has run against a live server. Check a phase item only when its code and tests pass.
+- **Status:** pre-release. Phases 0–2 are complete on `cursor/phase-2-profiles`. The PyPI name is reserved as 0.0.0. Nothing has run against a live server. Check a phase item only when its code and tests pass.
 
 ## Principles
 - **Patient scoping.**
@@ -106,8 +106,8 @@ These are the SMART configuration fields, not the FHIR `/metadata` CapabilitySta
 - [x] **Summary:** frozen; `to_text(max_chars)` cuts on item boundaries with "(+N more)" and keeps `Type/id` citations; FHIR free text is marked as data; `display.format_summary` is pure.
 
 **Phase 2: Profiles (1 d).** Scope selection stays in `scopes_from_capabilities`.
-- [ ] `generic`, `haste`, and `epic` are filled in, and `cerner` starts as a stub, using `adapt_search(resource, params)`, `resolve_medication`, and `discovery_paths`.
-- [ ] Switching servers is a one-line change and the helpers have no vendor branches.
+- [x] `generic`, `haste`, and `epic` are filled in, and `cerner` starts as a stub, using `adapt_search(resource, params)`, `resolve_medication`, and `discovery_paths`. Cerner's stub adds a missing Appointment `lt` bound (`lt9999-12-31T00:00:00Z`). `_count` and dropping `code` beside `category` stay for the sandbox pass.
+- [x] Switching servers is a one-line change and the helpers have no vendor branches.
 - *Tests:* each profile's `adapt_search`, for example Cerner adds an `lt` bound and Epic drops `_sort`.
 
 **Phase 3: Live against Haste (1.5 d).** Run local Haste with docker-compose: API on :3000, admin on :3001, tenant `my-health`, admin `myuser@health.org` / `testing_password`. Create the project `lk-demo`.

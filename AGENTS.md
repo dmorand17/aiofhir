@@ -1,6 +1,6 @@
 # AGENTS.md
 
-`aiofhir` is a thin async FHIR R4 and SMART on FHIR client. The design lives in `plans/PLAN-merged.md`. Phase 1 is the core client. The next implementation phase is Phase 2: server profiles adjust search and medication behavior. Do not start a later phase in the same change.
+`aiofhir` is a thin async FHIR R4 and SMART on FHIR client. The design lives in `plans/PLAN-merged.md`. Phase 2 is server profiles. The next implementation phase is Phase 3: a live Haste seed and smoke script. Do not start a later phase in the same change.
 
 When a plan item is finished, check it off in `plans/PLAN-merged.md` in the same change. Check it only when its code and tests pass.
 
