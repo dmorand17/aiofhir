@@ -3,7 +3,7 @@
 `aiofhir` is a thin **async FHIR R4 and SMART on FHIR client** for Python, built on httpx. It handles patient sign-in (`aiofhir.smart`), reading and searching, and patient-scoped helpers that return compact, cited summaries. It has **no LiveKit dependency**. LiveKit tools live in each demo repo.
 
 - **Why async httpx:** LiveKit agents run on asyncio, so a blocking client would stall the event loop during FHIR calls and token refreshes. httpx gives pooling, timeouts, HTTP/2 and a mockable transport (respx).
-- **Status:** pre-release. Standalone sign-in, read and search with paging, refresh, retries and five helpers exist, with unit tests against a mocked server. Nothing has run against a live server yet. **The phases below harden and extend the existing code; they don't rewrite it.**
+- **Status:** pre-release. Phase 0 is complete. Phase 1 is in progress on `cursor/phase-1-client`: the client is not implemented yet, and the GitHub Actions run and PyPI name reservation moved here from Phase 0. Nothing has run against a live server. Check a phase item only when its code and tests pass.
 
 ## Principles
 - **Patient scoping.**
@@ -78,10 +78,14 @@ Extras: `[server]` (fastapi, cryptography) and, later, `[jwt]`. There is **no `[
 These are the SMART configuration fields, not the FHIR `/metadata` CapabilityStatement. An explicit `SmartClient(..., scope="...")` replaces the derived string, for an app registration that allows less than the server advertises. That is the Epic case, where the app's registered scopes are narrower than the sandbox. If `permission-patient` and `permission-user` are both missing, discovery raises `DiscoveryError`.
 
 ## Phases (each has "done when" criteria; unit tests use respx fixtures)
-**Phase 0: Repo (0.5 d).** Rename to `aiofhir`, add the MIT license, set up CI (pytest, ruff, mypy strict on Python 3.11–3.13), and optionally reserve the PyPI name.
-- *Done when:* CI is green, and a test confirms `import aiofhir` loads no `livekit` or `fastapi`.
+**Phase 0: Repo (0.5 d).**
+- [x] Package named `aiofhir`, MIT license, src layout, justfile, and dev tooling.
+- [x] CI workflow runs pytest, ruff, and mypy strict on Python 3.11–3.13.
+- [x] `tests/test_import.py` confirms `import aiofhir` loads no `livekit` or `fastapi`. It passed locally.
 
-**Phase 1: Audit and harden the core (2.5 d).** Check the existing code against these criteria and fix the gaps.
+**Phase 1: Build the core (2.5 d).** Left off after the failing tests. `src/aiofhir` is still only `__init__.py`.
+- [ ] GitHub Actions is green on this branch.
+- [ ] Reserve the PyPI name `aiofhir`.
 - [ ] **Discovery:** fallback paths come from the profile; S256 is required; results are cached.
   - *Tests:* Haste returns 404 on the primary path and 200 on the fallback; every path failing raises `DiscoveryError`.
 - [ ] **Scopes:** `scopes_from_capabilities(cfg)` follows the Scopes table. Profiles do not override it. An explicit `scope=` replaces the derived string.
@@ -101,8 +105,9 @@ These are the SMART configuration fields, not the FHIR `/metadata` CapabilitySta
   - *Tests:* passing `patient` raises `TypeError`; `search_raw("Account")` is refused; cancelled and proposed appointments are dropped.
 - [ ] **Summary:** frozen; `to_text(max_chars)` cuts on item boundaries with "(+N more)" and keeps `Type/id` citations; FHIR free text is marked as data; `display.format_summary` is pure.
 
-**Phase 2: Profiles (1 d).** `generic`, `haste` and `epic` are filled in, and `cerner` starts as a stub, using `adapt_search(resource, params)`, `resolve_medication`, and `discovery_paths`. Scope selection stays in `scopes_from_capabilities`.
-- *Done when:* switching servers is a one-line change and the helpers have no vendor branches.
+**Phase 2: Profiles (1 d).** Scope selection stays in `scopes_from_capabilities`.
+- [ ] `generic`, `haste`, and `epic` are filled in, and `cerner` starts as a stub, using `adapt_search(resource, params)`, `resolve_medication`, and `discovery_paths`.
+- [ ] Switching servers is a one-line change and the helpers have no vendor branches.
 - *Tests:* each profile's `adapt_search`, for example Cerner adds an `lt` bound and Epic drops `_sort`.
 
 **Phase 3: Live against Haste (1.5 d).** Run local Haste with docker-compose: API on :3000, admin on :3001, tenant `my-health`, admin `myuser@health.org` / `testing_password`. Create the project `lk-demo`.
@@ -119,26 +124,28 @@ These are the SMART configuration fields, not the FHIR `/metadata` CapabilitySta
 - *Done when:* the live tests pass, the cancelled appointment is filtered out, every item has a citation, and no token appears in any output.
 
 **Phase 4: Server-side token mode (1 d).** `RemoteRecord` mirrors the `PatientRecord` methods. The optional `aiofhir[server]` reference backend has:
-- `/auth/start` and `/auth/callback` with single-use state;
-- `/v1/record/{method}` with a service bearer and a method allowlist;
-- a Fernet-encrypted store.
+- [ ] `/auth/start` and `/auth/callback` with single-use state.
+- [ ] `/v1/record/{method}` with a service bearer and a method allowlist.
+- [ ] A Fernet-encrypted store.
 - *Tests:* end to end over ASGI; an unknown session raises `AuthExpired`; no token appears in logs (caplog).
 
-**Phase 5: More helpers (1 d).** `immunizations`, `vital_signs`, `past_visits` (Encounter), `procedures`, and `documents` (titles and dates only), all in one summary style.
+**Phase 5: More helpers (1 d).**
+- [ ] `immunizations`, `vital_signs`, `past_visits` (Encounter), `procedures`, and `documents` (titles and dates only), all in one summary style.
 
 **Phase 6: Epic and Cerner sandboxes (1.5 d).** Run every helper against the Epic and Cerner sandboxes and record the differences in their profiles.
-- Epic test users: `fhircamila`, `fhirderrick` and `fhirdesiree`. They have no appointment data.
-- Cerner patient endpoint: `fhir-myrecord.cerner.com/r4/ec2458f2-…`.
+- [ ] Epic sandbox. Test users: `fhircamila`, `fhirderrick`, and `fhirdesiree`. They have no appointment data.
+- [ ] Cerner sandbox. Patient endpoint: `fhir-myrecord.cerner.com/r4/ec2458f2-…`.
 - *Done when:* the live tests pass on both, with skips documented.
 
 **Phase 7: Auth extensions, later (1.5 d).**
-- `private_key_jwt` with RS384/ES384 under `aiofhir[jwt]`, which Epic production prefers.
-- `client_credentials` for seeding and CI.
-- EHR launch: parse `iss` and `launch`, then discover from `iss`.
-- POST `_search` (form-encoded), `vread`, and a cached FHIR `/metadata` CapabilityStatement. SMART `capabilities` are already read during discovery.
-- Request hooks with PHI redaction.
+- [ ] `private_key_jwt` with RS384/ES384 under `aiofhir[jwt]`, which Epic production prefers.
+- [ ] `client_credentials` for seeding and CI.
+- [ ] EHR launch: parse `iss` and `launch`, then discover from `iss`.
+- [ ] POST `_search` (form-encoded), `vread`, and a cached FHIR `/metadata` CapabilityStatement. SMART `capabilities` are already read during discovery.
+- [ ] Request hooks with PHI redaction.
 
-**Phase 8: Release (0.5 d).** Docs (getting started, sign-in and state handling, profiles, helper reference), semver, a changelog, and PyPI trusted publishing.
+**Phase 8: Release (0.5 d).**
+- [ ] Docs (getting started, sign-in and state handling, profiles, helper reference), semver, a changelog, and PyPI trusted publishing.
 
 **Effort:** about 5.5 days to reach live against Haste (Phases 0–3), about 8.5 days through Epic and Cerner (Phases 0–6), and about 10.5 days for everything.
 
