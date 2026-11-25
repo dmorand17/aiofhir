@@ -15,7 +15,7 @@ class FakeTokens:
     async def get(self) -> str:
         return "token"
 
-    async def refresh(self) -> str:
+    async def refresh(self, stale: str | None = None) -> str:
         return "token"
 
 
@@ -88,16 +88,17 @@ async def test_search_raw_refuses_resources_outside_the_allowlist() -> None:
             await record.search_raw("Account")
 
 
-async def test_search_raw_replaces_a_caller_supplied_patient() -> None:
+async def test_search_raw_refuses_a_caller_supplied_patient() -> None:
     with respx.mock:
         route = respx.get(f"{BASE}/Observation").respond(200, json=_bundle([]))
         fhir, record = await _record()
         async with fhir:
-            await record.search_raw(
-                "Observation",
-                {"patient": "someone-else", "category": "laboratory"},
-            )
-    assert route.calls.last.request.url.params.get_list("patient") == ["pt-1"]
+            with pytest.raises(ValueError):
+                await record.search_raw(
+                    "Observation",
+                    {"patient": "someone-else", "category": "laboratory"},
+                )
+    assert not route.called
 
 
 async def test_active_medications_resolve_inline_contained_and_referenced() -> None:
@@ -228,3 +229,59 @@ async def test_conditions_allergies_and_labs_keep_active_matching_records() -> N
 
 async def _no_sleep(_seconds: float) -> None:
     return None
+
+
+async def test_summaries_carry_dates_values_and_dosage_for_the_agent() -> None:
+    with respx.mock:
+        respx.get(f"{BASE}/Appointment").respond(
+            200,
+            json=_bundle(
+                [
+                    {
+                        "resourceType": "Appointment",
+                        "id": "a1",
+                        "status": "booked",
+                        "start": "2026-06-04T15:00:00Z",
+                        "description": "Office visit",
+                    }
+                ]
+            ),
+        )
+        respx.get(f"{BASE}/Observation").respond(
+            200,
+            json=_bundle(
+                [
+                    {
+                        "resourceType": "Observation",
+                        "id": "o1",
+                        "effectiveDateTime": "2026-05-20",
+                        "code": {"text": "A1c"},
+                        "valueQuantity": {"value": 6.1, "unit": "%"},
+                    }
+                ]
+            ),
+        )
+        respx.get(f"{BASE}/MedicationRequest").respond(
+            200,
+            json=_bundle(
+                [
+                    {
+                        "resourceType": "MedicationRequest",
+                        "id": "m1",
+                        "status": "active",
+                        "authoredOn": "2026-05-01T09:30:00-04:00",
+                        "medicationCodeableConcept": {"text": "Lisinopril 10 mg"},
+                        "dosageInstruction": [{"text": "1 tablet daily"}],
+                    }
+                ]
+            ),
+        )
+        fhir, record = await _record()
+        async with fhir:
+            appointments = await record.upcoming_appointments()
+            labs = await record.recent_labs()
+            meds = await record.active_medications()
+    assert appointments.items[0].at == datetime(2026, 6, 4, 15, 0, tzinfo=UTC)
+    assert "2026-06-04T15:00:00Z" in appointments.to_text()
+    assert "«A1c: 6.1 %» 2026-05-20 (Observation/o1)" in labs.to_text()
+    assert "«Lisinopril 10 mg: 1 tablet daily» 2026-05-01T13:30:00Z" in meds.to_text()

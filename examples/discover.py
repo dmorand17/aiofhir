@@ -14,6 +14,7 @@ from pathlib import Path
 import httpx
 from dotenv import load_dotenv
 
+from aiofhir.log import configure_cli_logging
 from aiofhir.profiles import HasteProfile
 from aiofhir.smart.discovery import discover
 from aiofhir.smart.scopes import scopes_from_capabilities
@@ -32,6 +33,7 @@ def _base_url() -> str:
 
 
 async def main() -> None:
+    configure_cli_logging()
     base = _base_url()
     async with httpx.AsyncClient() as http:
         configuration = await discover(base, HasteProfile(), http)

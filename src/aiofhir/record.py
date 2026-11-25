@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+import re
 from collections.abc import Callable, Mapping, Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from aiofhir.client import FhirClient, SearchResult
@@ -14,14 +16,32 @@ _ALLOWED = frozenset(
         "Patient",
         "Appointment",
         "MedicationRequest",
-        "Medication",
         "AllergyIntolerance",
         "Condition",
         "Observation",
     }
 )
 _UPCOMING = frozenset({"booked", "pending"})
+# Parameters a caller may not send to search_raw: they name another patient,
+# pull in other resource types, or bypass the forced patient.
+_REFUSED_PARAMS = frozenset(
+    {
+        "patient",
+        "subject",
+        "_id",
+        "_include",
+        "_revinclude",
+        "_has",
+        "_contained",
+        "_containedType",
+        "_type",
+        "_list",
+        "_query",
+        "_filter",
+    }
+)
 Params = Mapping[str, str | Sequence[str]]
+logger = logging.getLogger(__name__)
 
 
 class PatientRecord:
@@ -36,11 +56,33 @@ class PatientRecord:
         self._clock = clock or (lambda: datetime.now(UTC))
 
     async def search_raw(self, resource: str, params: Params | None = None) -> SearchResult:
+        """Search an allowlisted type, always scoped to the token's patient.
+
+        Parameters that could widen the result (`subject`, `_include`,
+        `_revinclude`, `_has`, chained or modified `patient`, ...) raise
+        ValueError. Only resources of the requested type are returned.
+        """
         if resource not in _ALLOWED:
             raise ValueError(f"{resource} is not an allowed resource")
         merged = _normalize(params)
-        merged["patient"] = [self.patient_id]
-        return await self._fhir.search(resource, merged)
+        for key in merged:
+            base = re.split(r"[:.]", key, maxsplit=1)[0]
+            if base in _REFUSED_PARAMS:
+                raise ValueError(f"search_raw does not accept the {base} parameter")
+        if resource == "Patient":
+            merged["_id"] = [self.patient_id]
+        else:
+            merged["patient"] = [self.patient_id]
+        result = await self._fhir.search(resource, merged)
+        kept = tuple(item for item in result.resources if item.get("resourceType") == resource)
+        if len(kept) == len(result.resources):
+            return result
+        dropped = len(result.resources) - len(kept)
+        return SearchResult(
+            kept,
+            (*result.warnings, f"dropped {dropped} resources that were not {resource}"),
+            result.truncated,
+        )
 
     async def upcoming_appointments(self, days: int = 90) -> Summary:
         now = self._clock()
@@ -57,7 +99,11 @@ class PatientRecord:
         return _summary(
             "upcoming_appointments",
             [
-                Item(str(item.get("description") or "Appointment"), _cite("Appointment", item))
+                Item(
+                    str(item.get("description") or "Appointment"),
+                    _cite("Appointment", item),
+                    at=parse_fhir_datetime(item.get("start")),
+                )
                 for item in kept
             ],
             result,
@@ -70,7 +116,13 @@ class PatientRecord:
             if resource.get("status") != "active":
                 continue
             text = await self._fhir.profile.resolve_medication(resource, self._fhir.read)
-            items.append(Item(text, _cite("MedicationRequest", resource)))
+            items.append(
+                Item(
+                    _with_dosage(text, resource),
+                    _cite("MedicationRequest", resource),
+                    at=parse_fhir_datetime(resource.get("authoredOn")),
+                )
+            )
         return _summary("active_medications", items, result)
 
     async def allergies(self) -> Summary:
@@ -104,13 +156,24 @@ class PatientRecord:
         labs = list(result.resources)
         labs.sort(key=_effective, reverse=True)
         items = [
-            Item(_code_text(resource.get("code")), _cite("Observation", resource))
+            Item(
+                _lab_text(resource),
+                _cite("Observation", resource),
+                at=parse_fhir_datetime(_effective(resource) or None),
+            )
             for resource in labs
         ]
         return _summary("recent_labs", items, result)
 
 
 def _summary(kind: str, items: list[Item], result: SearchResult) -> Summary:
+    logger.debug(
+        "%s items=%s warnings=%s truncated=%s",
+        kind,
+        len(items),
+        len(result.warnings),
+        result.truncated,
+    )
     return Summary(
         kind=kind,
         items=tuple(items),
@@ -141,8 +204,53 @@ def _appointment_start(resource: dict[str, Any]) -> str:
 
 
 def _effective(resource: dict[str, Any]) -> str:
-    value = resource.get("effectiveDateTime")
-    return value if isinstance(value, str) else ""
+    for key in ("effectiveDateTime", "effectiveInstant", "issued"):
+        value = resource.get(key)
+        if isinstance(value, str) and value:
+            return value
+    period = resource.get("effectivePeriod")
+    if isinstance(period, dict) and isinstance(period.get("start"), str):
+        return str(period["start"])
+    return ""
+
+
+def parse_fhir_datetime(value: object) -> datetime | date | None:
+    """Parse a FHIR date or dateTime. Partial dates (YYYY, YYYY-MM) give None."""
+    if not isinstance(value, str) or len(value) < 10:
+        return None
+    if len(value) == 10:
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+def _lab_text(resource: dict[str, Any]) -> str:
+    name = _code_text(resource.get("code"))
+    quantity = resource.get("valueQuantity")
+    if isinstance(quantity, dict) and isinstance(quantity.get("value"), int | float):
+        unit = quantity.get("unit") or quantity.get("code") or ""
+        value = f"{quantity['value']} {unit}".strip()
+        return f"{name}: {value}" if name else value
+    string_value = resource.get("valueString")
+    if isinstance(string_value, str) and string_value:
+        return f"{name}: {string_value}" if name else string_value
+    concept = _code_text(resource.get("valueCodeableConcept"))
+    if concept:
+        return f"{name}: {concept}" if name else concept
+    return name
+
+
+def _with_dosage(text: str, resource: dict[str, Any]) -> str:
+    for dosage in resource.get("dosageInstruction") or []:
+        if isinstance(dosage, dict) and isinstance(dosage.get("text"), str) and dosage["text"]:
+            return f"{text}: {dosage['text']}" if text else str(dosage["text"])
+    return text
 
 
 def _code_text(concept: object) -> str:

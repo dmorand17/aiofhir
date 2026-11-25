@@ -1,0 +1,104 @@
+{
+  "resourceType": "Bundle",
+  "type": "batch",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Organization",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "org-seed-hospital"
+          }
+        ],
+        "active": true,
+        "type": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/organization-type",
+                "code": "prov",
+                "display": "Healthcare Provider"
+              }
+            ]
+          }
+        ],
+        "name": "aiofhir Seed Hospital"
+      },
+      "request": {
+        "method": "POST",
+        "url": "Organization",
+        "ifNoneExist": "identifier=https://aiofhir.dev/seed|org-seed-hospital"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Location",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "loc-seed-hospital"
+          }
+        ],
+        "status": "active",
+        "name": "aiofhir Seed Hospital",
+        "mode": "instance",
+        "type": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/v3-RoleCode",
+                "code": "HOSP",
+                "display": "Hospital"
+              }
+            ]
+          }
+        ],
+        "managingOrganization": {
+          "reference": "Organization?identifier=https://aiofhir.dev/seed|org-seed-hospital"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "url": "Location",
+        "ifNoneExist": "identifier=https://aiofhir.dev/seed|loc-seed-hospital"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Location",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "loc-seed-clinic"
+          }
+        ],
+        "status": "active",
+        "name": "aiofhir Seed Clinic",
+        "mode": "instance",
+        "type": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/v3-RoleCode",
+                "code": "OF",
+                "display": "Outpatient facility"
+              }
+            ]
+          }
+        ],
+        "managingOrganization": {
+          "reference": "Organization?identifier=https://aiofhir.dev/seed|org-seed-hospital"
+        },
+        "partOf": {
+          "reference": "Location?identifier=https://aiofhir.dev/seed|loc-seed-hospital"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "url": "Location",
+        "ifNoneExist": "identifier=https://aiofhir.dev/seed|loc-seed-clinic"
+      }
+    }
+  ]
+}

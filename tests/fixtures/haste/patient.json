@@ -1,0 +1,16 @@
+{
+  "resourceType": "Patient",
+  "id": "example-patient",
+  "identifier": [
+    {
+      "system": "https://aiofhir.dev/seed",
+      "value": "example-patient"
+    }
+  ],
+  "name": [
+    {
+      "family": "Example",
+      "given": ["Pat"]
+    }
+  ]
+}

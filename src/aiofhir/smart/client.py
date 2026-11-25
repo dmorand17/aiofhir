@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import base64
 import hmac
+import logging
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlencode
@@ -19,6 +20,8 @@ from aiofhir.smart.discovery import SmartConfiguration, discover
 from aiofhir.smart.pkce import challenge_s256, make_state, make_verifier
 from aiofhir.smart.scopes import scopes_from_capabilities
 from aiofhir.smart.tokens import TokenSet, fhir_user_from_id_token
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -52,6 +55,8 @@ class SmartClient:
     async def authorization_request(self) -> AuthorizationRequest:
         configuration = await self._configuration()
         scope = self.scope if self.scope is not None else scopes_from_capabilities(configuration)
+        logger.info("preparing authorization request for %s", self.client_id)
+        logger.debug("authorization scope %s", scope)
         state = make_state()
         verifier = make_verifier()
         query = urlencode(
@@ -75,6 +80,7 @@ class SmartClient:
     async def exchange_code(self, code: str, verifier: str) -> TokenSet:
         configuration = await self._configuration()
         scope = self.scope if self.scope is not None else scopes_from_capabilities(configuration)
+        logger.info("exchanging authorization code for %s", self.client_id)
         body = await self._token_request(
             configuration,
             {
@@ -86,13 +92,28 @@ class SmartClient:
         )
         return self._token_set(body, scope)
 
-    async def exchange_refresh(self, refresh_token: str, scope: str) -> TokenSet:
+    async def exchange_refresh(
+        self,
+        refresh_token: str,
+        scope: str,
+        previous: TokenSet | None = None,
+    ) -> TokenSet:
+        """Refresh an access token.
+
+        Refresh responses often omit the launch context, so `patient`, `encounter`,
+        `need_patient_banner`, `id_token` and `fhir_user` carry over from `previous`.
+        A refresh that names a different patient is refused.
+        """
+        logger.info("refreshing access token for %s", self.client_id)
         configuration = await self._configuration()
         body = await self._token_request(
             configuration,
             {"grant_type": "refresh_token", "refresh_token": refresh_token},
         )
-        return self._token_set(body, scope, refresh_token)
+        refreshed = self._token_set(body, scope, refresh_token, require_patient=False)
+        if previous is None:
+            return refreshed
+        return _carry_context(previous, refreshed)
 
     async def _configuration(self) -> SmartConfiguration:
         async with httpx.AsyncClient() as http:
@@ -111,6 +132,8 @@ class SmartClient:
             data["client_secret"] = self.client_secret
         async with httpx.AsyncClient() as http:
             response = await http.post(configuration.token_endpoint, data=data, headers=headers)
+        grant = fields["grant_type"]
+        logger.debug("token endpoint status=%s grant=%s", response.status_code, grant)
         return _token_body(response)
 
     def _use_basic(self, configuration: SmartConfiguration) -> bool:
@@ -121,12 +144,14 @@ class SmartClient:
         body: Mapping[str, Any],
         requested_scope: str,
         refresh_token: str | None = None,
+        *,
+        require_patient: bool = True,
     ) -> TokenSet:
         patient = body.get("patient")
-        if "launch/patient" in requested_scope.split() and not isinstance(patient, str):
+        wants_patient = "launch/patient" in requested_scope.split()
+        if require_patient and wants_patient and not isinstance(patient, str):
             raise TokenError("Token response did not include a patient")
-        expires_in = body.get("expires_in")
-        seconds = int(expires_in) if isinstance(expires_in, int | float | str) else 0
+        seconds = _expires_in(body.get("expires_in"))
         raw_id_token = body.get("id_token")
         id_token = raw_id_token if isinstance(raw_id_token, str) else None
         banner = body.get("need_patient_banner")
@@ -135,6 +160,7 @@ class SmartClient:
         access = body.get("access_token")
         if not isinstance(access, str) or not access:
             raise TokenError("Token response did not include an access token")
+        logger.debug("token response includes_patient=%s", isinstance(patient, str))
         raw_refresh = body.get("refresh_token")
         encounter = body.get("encounter")
         return TokenSet(
@@ -148,6 +174,44 @@ class SmartClient:
             id_token=id_token,
             fhir_user=fhir_user_from_id_token(id_token),
         )
+
+
+# Used when the token response has no usable `expires_in`. Short, so an unknown
+# lifetime refreshes early instead of being treated as already expired.
+DEFAULT_EXPIRES_IN = 300
+
+
+def _expires_in(value: object) -> int:
+    if isinstance(value, bool):
+        return DEFAULT_EXPIRES_IN
+    if isinstance(value, int | float):
+        seconds = int(value)
+    elif isinstance(value, str) and value.strip().isdigit():
+        seconds = int(value.strip())
+    else:
+        return DEFAULT_EXPIRES_IN
+    return seconds if seconds > 0 else DEFAULT_EXPIRES_IN
+
+
+def _carry_context(previous: TokenSet, refreshed: TokenSet) -> TokenSet:
+    if (
+        previous.patient is not None
+        and refreshed.patient is not None
+        and refreshed.patient != previous.patient
+    ):
+        raise AuthExpired()
+    return replace(
+        refreshed,
+        patient=refreshed.patient or previous.patient,
+        encounter=refreshed.encounter or previous.encounter,
+        need_patient_banner=(
+            refreshed.need_patient_banner
+            if refreshed.need_patient_banner is not None
+            else previous.need_patient_banner
+        ),
+        id_token=refreshed.id_token or previous.id_token,
+        fhir_user=refreshed.fhir_user or previous.fhir_user,
+    )
 
 
 def verify_state(*, expected: str, received: str) -> None:

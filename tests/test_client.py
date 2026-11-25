@@ -20,7 +20,7 @@ class FakeTokens:
     async def get(self) -> str:
         return self.token
 
-    async def refresh(self) -> str:
+    async def refresh(self, stale: str | None = None) -> str:
         self.refreshes += 1
         self.token = "new-token"
         return self.token
