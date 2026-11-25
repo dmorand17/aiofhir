@@ -3,7 +3,7 @@
 `aiofhir` is a thin **async FHIR R4 and SMART on FHIR client** for Python, built on httpx. It handles patient sign-in (`aiofhir.smart`), reading and searching, and patient-scoped helpers that return compact, cited summaries. It has **no LiveKit dependency**. LiveKit tools live in each demo repo.
 
 - **Why async httpx:** LiveKit agents run on asyncio, so a blocking client would stall the event loop during FHIR calls and token refreshes. httpx gives pooling, timeouts, HTTP/2 and a mockable transport (respx).
-- **Status:** pre-release. Phase 0 is complete. Phase 1 is in progress on `cursor/phase-1-client`: the client is not implemented yet. The PyPI name is reserved as 0.0.0. Nothing has run against a live server. Check a phase item only when its code and tests pass.
+- **Status:** pre-release. Phase 0 and Phase 1 are complete on `cursor/phase-1-client`. The PyPI name is reserved as 0.0.0. Nothing has run against a live server. Check a phase item only when its code and tests pass.
 
 ## Principles
 - **Patient scoping.**
@@ -83,27 +83,27 @@ These are the SMART configuration fields, not the FHIR `/metadata` CapabilitySta
 - [x] CI workflow runs pytest, ruff, and mypy strict on Python 3.11–3.13.
 - [x] `tests/test_import.py` confirms `import aiofhir` loads no `livekit` or `fastapi`. It passed locally.
 
-**Phase 1: Build the core (2.5 d).** Left off after the failing tests. `src/aiofhir` is still only `__init__.py`.
+**Phase 1: Build the core (2.5 d).** Unit tests pass. The single-use OAuth state store stays in Phase 4.
 - [x] GitHub Actions is green on this branch.
 - [x] Reserve the PyPI name `aiofhir`. Published 0.0.0 to https://pypi.org/project/aiofhir/.
-- [ ] **Discovery:** fallback paths come from the profile; S256 is required; results are cached.
+- [x] **Discovery:** fallback paths come from the profile; S256 is required; results are cached.
   - *Tests:* Haste returns 404 on the primary path and 200 on the fallback; every path failing raises `DiscoveryError`.
-- [ ] **Scopes:** `scopes_from_capabilities(cfg)` follows the Scopes table. Profiles do not override it. An explicit `scope=` replaces the derived string.
+- [x] **Scopes:** `scopes_from_capabilities(cfg)` follows the Scopes table. Profiles do not override it. An explicit `scope=` replaces the derived string.
   - *Tests:* recorded configurations for Haste (`permission-v2`, `permission-patient`, `patient/*.rs`), Epic v1 (`.read` only), and Cerner (per-resource `scopes_supported`, no wildcard). Also: user-only capabilities select `user/`; both syntaxes listed prefers v2; explicit `scope=` wins; no patient or user permission raises `DiscoveryError`.
-- [ ] **Auth request:** 256-bit state; verifier is 43–128 unreserved characters; `aud` is sent; `verify_state()` is constant-time.
-  - *Tests:* RFC 7636 test vector; a mismatched state is refused; a reused state is refused by the reference store.
-- [ ] **Exchange:** basic or post client auth is chosen from the config; a missing `patient` raises `TokenError` when the request included `launch/patient`; `TokenSet` carries `encounter` and `need_patient_banner`.
-- [ ] **RefreshingToken:** refreshes 60 s early behind a lock with a double-check; persists rotation; `invalid_grant` raises `AuthExpired`.
+- [x] **Auth request:** 256-bit state; verifier is 43–128 unreserved characters; `aud` is sent; `verify_state()` is constant-time.
+  - *Tests:* RFC 7636 test vector; a mismatched state is refused. Reused state is refused by the Phase 4 reference store, not by this client.
+- [x] **Exchange:** basic or post client auth is chosen from the config; a missing `patient` raises `TokenError` when the request included `launch/patient`; `TokenSet` carries `encounter` and `need_patient_banner`.
+- [x] **RefreshingToken:** refreshes 60 s early behind a lock with a double-check; persists rotation; `invalid_grant` raises `AuthExpired`.
   - *Tests:* 20 concurrent `get()` calls make exactly 1 `/token` call.
-- [ ] **FhirClient:**
+- [x] **FhirClient:**
   - Retries 429/502/503/504 twice with backoff and jitter, honoring `Retry-After`.
   - On a 401, refreshes once and retries once, then raises `AuthExpired`.
   - Drops OperationOutcome entries into `.warnings`.
   - Follows only same-origin `next` links, with `max_pages=10`.
   - Configurable timeouts, a concurrency semaphore (default 4), and `iter_search`.
-- [ ] **PatientRecord:** forced patient and allowlist. `upcoming_appointments` uses `date=ge{now}&date=lt{now+days}&_sort=date`, then a client-side booked/pending filter and sort.
+- [x] **PatientRecord:** forced patient and allowlist. `upcoming_appointments` uses `date=ge{now}&date=lt{now+days}&_sort=date`, then a client-side booked/pending filter and sort.
   - *Tests:* passing `patient` raises `TypeError`; `search_raw("Account")` is refused; cancelled and proposed appointments are dropped.
-- [ ] **Summary:** frozen; `to_text(max_chars)` cuts on item boundaries with "(+N more)" and keeps `Type/id` citations; FHIR free text is marked as data; `display.format_summary` is pure.
+- [x] **Summary:** frozen; `to_text(max_chars)` cuts on item boundaries with "(+N more)" and keeps `Type/id` citations; FHIR free text is marked as data; `display.format_summary` is pure.
 
 **Phase 2: Profiles (1 d).** Scope selection stays in `scopes_from_capabilities`.
 - [ ] `generic`, `haste`, and `epic` are filled in, and `cerner` starts as a stub, using `adapt_search(resource, params)`, `resolve_medication`, and `discovery_paths`.
@@ -158,8 +158,8 @@ These are the SMART configuration fields, not the FHIR `/metadata` CapabilitySta
 - LiveKit tools and UI.
 
 ## Open questions
-- **Haste:** the base URL, hosted (BAA, rate limits) or self-hosted, and the tenant and project. Can I create Users, Memberships, AccessPolicies and the ClientApplication? Does it support `_sort` and two date bounds? Phase 3 records the live `capabilities` document and the scope string that authorize accepted.
-- **Repo:** `dmorand17/aiofhir` or the LiveKit-Field org? License is MIT.
+- **Haste:** the example project is hosted at `https://api.haste.health`, tenant `livekit`, project `synthea-sandbox`. Its FHIR base is `https://api.haste.health/w/livekit/synthea-sandbox/api/v1/fhir`, and SMART configuration is that base plus `/.well-known/smart-configuration`. Still open: BAA and rate limits, whether we can create Users, Memberships, AccessPolicies and the ClientApplication, and whether search supports `_sort` and two date bounds. Phase 3 records the live `capabilities` document and the scope string that authorize accepted.
+- **Repo:** Currently `dmorand17/aiofhir`. Publishing under the LiveKit Field org is still open. License is MIT.
 - **Scope:** keep aiofhir focused on patient reads for agents rather than a general FHIR client.
 - **Server extra:** keep the reference backend in this repo, or move it to `examples/`?
 

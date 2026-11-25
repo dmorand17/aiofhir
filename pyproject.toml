@@ -17,7 +17,14 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-dev = ["mypy>=1.14", "pytest>=8.3", "ruff>=0.8"]
+dev = [
+    "mypy>=1.14",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "python-dotenv>=1.0",
+    "respx>=0.22",
+    "ruff>=0.8",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -25,6 +32,8 @@ build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]
 target-version = "py311"
@@ -38,5 +47,9 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "examples"]
 mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = ["respx", "respx.*"]
+ignore_missing_imports = true
