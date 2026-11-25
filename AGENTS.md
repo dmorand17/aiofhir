@@ -10,7 +10,7 @@
 
 ## Library rules
 
-- Importing `aiofhir` must not load `livekit` or `fastapi`. There is no LiveKit extra. The FastAPI reference server is a later optional extra and stays out of the core import.
+- Importing `aiofhir` must not load `fastapi`. The FastAPI reference server is a later optional extra and stays out of the core import.
 - The patient id comes only from the token response. Helpers add `patient=` themselves and do not accept it as an argument.
 - Scopes come from the server's SMART `capabilities` and `scopes_supported`. Profiles adjust search and medication behavior. They do not choose scopes.
 - An explicit `scope=` is only for an app registration that allows less than the server advertises.
@@ -19,4 +19,4 @@
 
 ## Later phases
 
-Writes and booking, typed models for every resource, FHIR versions other than R4, bulk data, token storage in the core, and LiveKit tools stay out until their own phase.
+Writes and booking, typed models for every resource, FHIR versions other than R4, bulk data, and token storage in the core stay out until their own phase.
