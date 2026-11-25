@@ -1,0 +1,162 @@
+{
+  "entry": [
+    {
+      "resource": {
+        "description": "appt-booked-14",
+        "id": "jjn8zduxan-fbzsat6xedvd3le",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "appt-booked-14"
+          }
+        ],
+        "participant": [
+          {
+            "actor": {
+              "reference": "Patient/example-patient"
+            },
+            "status": "accepted"
+          }
+        ],
+        "resourceType": "Appointment",
+        "start": "2026-12-09T20:36:23+00:00",
+        "status": "booked"
+      },
+      "search": {
+        "mode": "match"
+      }
+    },
+    {
+      "resource": {
+        "description": "appt-booked-3",
+        "id": "-j23gvk31ma-iqggzoiwctz03i",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "appt-booked-3"
+          }
+        ],
+        "participant": [
+          {
+            "actor": {
+              "reference": "Patient/example-patient"
+            },
+            "status": "accepted"
+          }
+        ],
+        "resourceType": "Appointment",
+        "start": "2026-11-28T20:36:23+00:00",
+        "status": "booked"
+      },
+      "search": {
+        "mode": "match"
+      }
+    },
+    {
+      "resource": {
+        "description": "appt-booked-45",
+        "id": "9qjt510qkh187tjhmw1dfhtcj4",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "appt-booked-45"
+          }
+        ],
+        "participant": [
+          {
+            "actor": {
+              "reference": "Patient/example-patient"
+            },
+            "status": "accepted"
+          }
+        ],
+        "resourceType": "Appointment",
+        "start": "2027-01-09T20:36:23+00:00",
+        "status": "booked"
+      },
+      "search": {
+        "mode": "match"
+      }
+    },
+    {
+      "resource": {
+        "description": "appt-cancelled",
+        "id": "hnurfioxje1ll7zkx4fbj15n-g",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "appt-cancelled"
+          }
+        ],
+        "participant": [
+          {
+            "actor": {
+              "reference": "Patient/example-patient"
+            },
+            "status": "accepted"
+          }
+        ],
+        "resourceType": "Appointment",
+        "start": "2026-11-26T20:36:23+00:00",
+        "status": "cancelled"
+      },
+      "search": {
+        "mode": "match"
+      }
+    },
+    {
+      "resource": {
+        "description": "appt-pending",
+        "id": "8abqkrmovfv2m5qpjl8s8tclo5",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "appt-pending"
+          }
+        ],
+        "participant": [
+          {
+            "actor": {
+              "reference": "Patient/example-patient"
+            },
+            "status": "accepted"
+          }
+        ],
+        "resourceType": "Appointment",
+        "start": "2026-12-02T20:36:23+00:00",
+        "status": "pending"
+      },
+      "search": {
+        "mode": "match"
+      }
+    },
+    {
+      "resource": {
+        "description": "appt-past",
+        "id": "98b5rppum4uxrd-1w-siwbat4g",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "appt-past"
+          }
+        ],
+        "participant": [
+          {
+            "actor": {
+              "reference": "Patient/example-patient"
+            },
+            "status": "accepted"
+          }
+        ],
+        "resourceType": "Appointment",
+        "start": "2026-11-15T20:36:23+00:00",
+        "status": "fulfilled"
+      },
+      "search": {
+        "mode": "match"
+      }
+    }
+  ],
+  "resourceType": "Bundle",
+  "type": "searchset"
+}

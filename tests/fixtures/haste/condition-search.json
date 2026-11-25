@@ -1,0 +1,43 @@
+{
+  "entry": [
+    {
+      "resource": {
+        "category": [
+          {
+            "coding": [
+              {
+                "code": "problem-list-item"
+              }
+            ]
+          }
+        ],
+        "clinicalStatus": {
+          "coding": [
+            {
+              "code": "active"
+            }
+          ]
+        },
+        "code": {
+          "text": "Asthma"
+        },
+        "id": "condition-asthma",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "condition-asthma"
+          }
+        ],
+        "resourceType": "Condition",
+        "subject": {
+          "reference": "Patient/example-patient"
+        }
+      },
+      "search": {
+        "mode": "match"
+      }
+    }
+  ],
+  "resourceType": "Bundle",
+  "type": "searchset"
+}

@@ -240,3 +240,71 @@ async def test_timeout_is_applied() -> None:
 
 async def _no_sleep(_seconds: float) -> None:
     return None
+
+
+def _offset_page(start: int, size: int) -> dict[str, object]:
+    return {
+        "resourceType": "Bundle",
+        "entry": [
+            {"resource": {"resourceType": "Observation", "id": f"o{i}"}}
+            for i in range(start, start + size)
+        ],
+    }
+
+
+async def test_haste_pages_with_offset_when_a_full_page_has_no_next_link() -> None:
+    from aiofhir.profiles import HasteProfile
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        offset = int(request.url.params.get("_offset", "0"))
+        size = 2 if offset < 4 else 1
+        return httpx.Response(200, json=_offset_page(offset, size))
+
+    with respx.mock:
+        route = respx.get(f"{BASE}/Observation").mock(side_effect=respond)
+        async with FhirClient(BASE, FakeTokens(), profile=HasteProfile(), sleep=_no_sleep) as fhir:
+            result = await fhir.search("Observation", {"patient": "pt-1", "_count": "2"})
+    assert [r["id"] for r in result.resources] == ["o0", "o1", "o2", "o3", "o4"]
+    assert [c.request.url.params.get("_offset") for c in route.calls] == [None, "2", "4"]
+    assert all(c.request.url.params["patient"] == "pt-1" for c in route.calls)
+    assert not result.truncated
+
+
+async def test_haste_offset_paging_uses_the_default_page_of_fifty() -> None:
+    from aiofhir.profiles import HasteProfile
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        offset = int(request.url.params.get("_offset", "0"))
+        return httpx.Response(200, json=_offset_page(offset, 50 if offset == 0 else 3))
+
+    with respx.mock:
+        route = respx.get(f"{BASE}/Observation").mock(side_effect=respond)
+        async with FhirClient(BASE, FakeTokens(), profile=HasteProfile(), sleep=_no_sleep) as fhir:
+            result = await fhir.search("Observation", {"patient": "pt-1"})
+    assert len(result.resources) == 53
+    assert route.call_count == 2
+
+
+async def test_haste_offset_paging_stops_at_max_pages_and_marks_truncated() -> None:
+    from aiofhir.profiles import HasteProfile
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json=_offset_page(int(request.url.params.get("_offset", "0")), 1)
+        )
+
+    with respx.mock:
+        route = respx.get(f"{BASE}/Observation").mock(side_effect=respond)
+        async with FhirClient(BASE, FakeTokens(), profile=HasteProfile(), sleep=_no_sleep) as fhir:
+            result = await fhir.search("Observation", {"_count": "1"}, max_pages=3)
+    assert route.call_count == 3
+    assert result.truncated
+
+
+async def test_generic_profile_does_not_page_by_offset() -> None:
+    with respx.mock:
+        route = respx.get(f"{BASE}/Observation").respond(200, json=_offset_page(0, 2))
+        async with FhirClient(BASE, FakeTokens(), sleep=_no_sleep) as fhir:
+            result = await fhir.search("Observation", {"_count": "2"})
+    assert route.call_count == 1
+    assert len(result.resources) == 2

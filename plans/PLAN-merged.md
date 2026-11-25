@@ -3,7 +3,7 @@
 `aiofhir` is a thin **async FHIR R4 and SMART on FHIR client** for Python, built on httpx. It handles patient sign-in (`aiofhir.smart`), reading and searching, and patient-scoped helpers that return compact, cited summaries. It has **no LiveKit dependency**. LiveKit tools live in each demo repo.
 
 - **Why async httpx:** LiveKit agents run on asyncio, so a blocking client would stall the event loop during FHIR calls and token refreshes. httpx gives pooling, timeouts, HTTP/2 and a mockable transport (respx).
-- **Status:** pre-release. Phases 0–2 are complete. Phase 3 is in progress on `cursor/phase-3-haste`: the seed and smoke scripts run against a fake server, and the live Haste checks stay opt-in. The PyPI name is reserved as 0.0.0. Check a phase item only when its code and tests pass.
+- **Status:** pre-release. Phases 0–3 are complete. Phase 3 ran live against the hosted Haste project `livekit/synthea-sandbox` on `cursor/phase-3-haste`. The live checks stay opt-in. The PyPI name is reserved as 0.0.0. Check a phase item only when its code and tests pass.
 
 ## Principles
 - **Patient scoping.**
@@ -56,11 +56,12 @@ Extras: `[server]` (fastapi, cryptography) and, later, `[jwt]`. There is **no `[
 |---|---|---|---|---|
 | Discovery | `{base}/.well-known/smart-configuration`, then fallback `/w/{t}/{p}/api/v1/.well-known/smart-configuration` | standard | standard (per-tenant base) | standard |
 | Scopes | from SMART `capabilities` and `scopes_supported` (see Scopes) | same | same | same |
-| Patient context | User linked to Patient via `Membership`; no picker | MyChart login | patient-persona authorize URL | token `patient` |
+| Patient context | `member` User linked to Patient via `Membership`; no picker. An `owner` gets no `patient/*` scopes | MyChart login | patient-persona authorize URL | token `patient` |
 | Refresh | `offline_access`; rotation | **confidential client required** | `offline_access` / `online_access` | config |
-| Appointment | `date=ge…&date=lt…&_sort=date` (verify) | `patient` required; no `_sort`, sort on client | **both `ge` and `lt` bounds required**; sorted ascending | as given |
-| Medications | inline concept (Synthea) | `medicationReference` → read `Medication` | mostly inline (verify) | resolve references and contained resources |
+| Appointment | `date=ge…&date=lt…&_sort=date` (accepted) | `patient` required; no `_sort`, sort on client | **both `ge` and `lt` bounds required**; sorted ascending | as given |
+| Medications | inline, contained and referenced all resolve | `medicationReference` → read `Medication` | mostly inline (verify) | resolve references and contained resources |
 | Observation | standard | expects `category` or `code` (verify); sort on client | `_count` ≤ 200; `code` ignored with `category` | standard |
+| Paging | no `next` links; `_offset`, default page 50 (`next_page`) | `next` links | `next` links | `next` links |
 
 ## Scopes
 
@@ -110,18 +111,19 @@ These are the SMART configuration fields, not the FHIR `/metadata` CapabilitySta
 - [x] Switching servers is a one-line change and the helpers have no vendor branches.
 - *Tests:* each profile's `adapt_search`, for example Cerner adds an `lt` bound and Epic drops `_sort`.
 
-**Phase 3: Live against Haste (1.5 d).** Run local Haste with docker-compose: API on :3000, admin on :3001, tenant `my-health`, admin `myuser@health.org` / `testing_password`. Create the project `lk-demo`.
-- [ ] **`haste/seed.py`** is idempotent and creates:
-  - a Patient with Practitioners and Locations;
-  - Appointments at past, +3/+14/+45 days, one pending and one cancelled;
+**Phase 3: Live against Haste (1.5 d).** Ran against the hosted project `https://api.haste.health/w/livekit/synthea-sandbox` (local docker-compose Haste also works: tenant `my-health`, project `lk-demo`). Setup and run order are in `haste/README.md`.
+- [x] **`haste/seed.py`** is idempotent and creates:
+  - a Patient with Practitioners and Locations (loaded from `haste/synthea-data`; appointments do not reference them yet);
+  - Appointments at past, +3/+14/+45 days, one pending and one cancelled (reruns move them to fresh dates);
   - active and stopped MedicationRequests, covering inline codes, references and contained Medications;
   - an AllergyIntolerance, Conditions and lab Observations;
-  - a User with a `Membership` linked to the Patient, plus a **read-only, own-patient AccessPolicyV2**;
+  - a User with a `Membership` linked to the Patient, plus a **read-only, own-patient AccessPolicyV2**. The policy permits read-type requests; the `patient/` scope keeps them in the patient's compartment (live: another Patient is 404, writes are 403). The User must have the `member` role. On the hosted tenant the admin token cannot write the `system` project, so invite the User in the console and set `SEED_USER_ID`;
   - a `ClientApplication` with redirect `http://localhost:8765/callback`, grants `authorization_code` and `refresh_token`, and an allowed scope copied from that server's `scopes_supported` (so the derived request is a subset of what the app may ask for).
-- [ ] **`haste/smoke.py`:** browser login with no `scope=` argument, state check, code exchange, every helper printed, one forced refresh. The requested scope is the one `scopes_from_capabilities` built.
-- [ ] **`tests/live`:** opt-in through environment credentials. It checks that the token has a `patient`, that every resource returned belongs to that patient, and that paging terminates.
-- [ ] **Recorded, de-identified fixtures** go into the unit tests, with a scrubber check.
-- *Done when:* the live tests pass, the cancelled appointment is filtered out, every item has a citation, and no token appears in any output.
+- [x] **`haste/smoke.py`:** browser login with no `scope=` argument, state check, code exchange, every helper printed, one forced refresh. The requested scope is the one `scopes_from_capabilities` built.
+- [x] **`tests/live`:** opt-in with `AIOFHIR_LIVE=1` and the TokenSet that `SAVE_TOKENS=1 just smoke` saves. It checks that the token has a `patient`, that every resource returned belongs to that patient, and that paging terminates.
+- [x] **Recorded, de-identified fixtures** go into the unit tests, with a scrubber check. `haste/record_fixtures.py` writes `tests/fixtures/haste/`, and `tests/test_haste_fixtures.py` replays them.
+- *Done when:* the live tests pass, the cancelled appointment is filtered out, every item has a citation, and no token appears in any output. Met on 2026-11-25: 4 live tests passed.
+- *Found live:* Haste pages with `_offset` and sends no `next` links, so `ServerProfile.next_page` was added and `HasteProfile` uses it. A Haste rule-engine policy fails closed with "No policy has granted access" when a rule has both `combineBehavior` and a `condition`.
 
 **Phase 4: Server-side token mode (1 d).** `RemoteRecord` mirrors the `PatientRecord` methods. The optional `aiofhir[server]` reference backend has:
 - [ ] `/auth/start` and `/auth/callback` with single-use state.
@@ -158,7 +160,7 @@ These are the SMART configuration fields, not the FHIR `/metadata` CapabilitySta
 - LiveKit tools and UI.
 
 ## Open questions
-- **Haste:** the example project is hosted at `https://api.haste.health`, tenant `livekit`, project `synthea-sandbox`. Its FHIR base is `https://api.haste.health/w/livekit/synthea-sandbox/api/v1/fhir`, and SMART configuration is that base plus `/.well-known/smart-configuration`. Still open: BAA and rate limits, whether we can create Users, Memberships, AccessPolicies and the ClientApplication, and whether search supports `_sort` and two date bounds. Phase 3 records the live `capabilities` document and the scope string that authorize accepted.
+- **Haste:** the example project is hosted at `https://api.haste.health`, tenant `livekit`, project `synthea-sandbox`. Its FHIR base is `https://api.haste.health/w/livekit/synthea-sandbox/api/v1/fhir`, and SMART configuration is that base plus `/.well-known/smart-configuration`. Settled in Phase 3: an admin token can create Memberships, AccessPolicies and the ClientApplication in the project, but not Users (they live in the tenant `system` project). Search accepts `_sort=date` and two date bounds. Authorize accepted `patient/*.rs launch/patient openid fhirUser offline_access`, and `tests/fixtures/haste/smart-configuration.json` holds the live `capabilities`. Still open: BAA and rate limits.
 - **Repo:** Currently `dmorand17/aiofhir`. Publishing under the LiveKit Field org is still open. License is MIT.
 - **Scope:** keep aiofhir focused on patient reads for agents rather than a general FHIR client.
 - **Server extra:** keep the reference backend in this repo, or move it to `examples/`?

@@ -1,6 +1,6 @@
 """Create the aiofhir smoke client and seed appointments on a Haste project.
 
-Reads BASE from the environment or a repo-root .env file. When HASTE_TOKEN
+Reads BASE from the environment, the repo-root .env, or haste/.env. When HASTE_TOKEN
 is missing, signs in with the existing CLIENT_ID and keeps the token in memory.
 Set SAVE_HASTE_TOKEN=1 to also write it to .env (mode 600).
 PATIENT_ID is written after the seed patient is created or reused.
@@ -49,6 +49,7 @@ logger = logging.getLogger("haste.seed")
 
 def _env(name: str) -> str:
     load_dotenv(_ROOT / ".env")
+    load_dotenv(_ROOT / "haste" / ".env")
     value = os.environ.get(name, "").strip()
     if not value:
         print(f"Set {name}.", file=sys.stderr)
@@ -75,6 +76,7 @@ def _optional_bundle(directory: str, prefix: str) -> dict[str, Any] | None:
 
 async def _token() -> str:
     load_dotenv(_ROOT / ".env")
+    load_dotenv(_ROOT / "haste" / ".env")
     token = os.environ.get("HASTE_TOKEN", "").strip()
     if token:
         return token
@@ -92,6 +94,11 @@ async def _token() -> str:
         save_env_value(_ROOT / ".env", "HASTE_TOKEN", token)
         print("Saved HASTE_TOKEN to .env (mode 600). Remove it when you are done seeding.")
     return token
+
+
+def _save_client_secret(secret: str) -> None:
+    """Saved as soon as the client exists, so a later failure cannot lose it."""
+    save_env_value(_ROOT / ".env", "SMOKE_CLIENT_SECRET", secret)
 
 
 async def _main() -> None:
@@ -117,6 +124,7 @@ async def _main() -> None:
                 seed_user_id=_optional("SEED_USER_ID"),
                 system_base=_optional("SYSTEM_BASE"),
                 system_token=_optional("SYSTEM_TOKEN"),
+                on_client_secret=_save_client_secret,
             )
         except SeedUserError as exc:
             print(f"Patient user: {exc}", file=sys.stderr)
@@ -125,7 +133,6 @@ async def _main() -> None:
         save_env_value(_ROOT / ".env", "PATIENT_ID", result.patient_id)
     lines = [f"patient_id: {result.patient_id}", f"client_id: {CLIENT_ID}"]
     if result.created_secret:
-        save_env_value(_ROOT / ".env", "SMOKE_CLIENT_SECRET", result.created_secret)
         lines.append("client_secret: saved to .env as SMOKE_CLIENT_SECRET")
     else:
         lines.append("client_secret: unchanged (client already existed)")

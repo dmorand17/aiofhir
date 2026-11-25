@@ -1,0 +1,13 @@
+{
+  "code": {
+    "text": "Metformin"
+  },
+  "id": "med-remote",
+  "identifier": [
+    {
+      "system": "https://aiofhir.dev/seed",
+      "value": "med-remote"
+    }
+  ],
+  "resourceType": "Medication"
+}

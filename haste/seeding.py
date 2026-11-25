@@ -84,7 +84,6 @@ def build_read_policy() -> Json:
         "rule": [
             {
                 "name": "read-only",
-                "combineBehavior": "any",
                 "condition": {"expression": {"language": "text/fhirpath", "expression": condition}},
             }
         ],
@@ -262,6 +261,7 @@ async def apply_seed(
     system_base: str | None = None,
     system_token: str | None = None,
     sleep: Sleep = asyncio.sleep,
+    on_client_secret: Callable[[str], None] | None = None,
 ) -> SeedResult:
     """Seed the project, then link a patient User when one is named.
 
@@ -276,6 +276,8 @@ async def apply_seed(
             http, root, token, practitioner_bundle, hospital_bundle, sleep
         )
     created_secret = await _ensure_client(http, root, token, configuration, secret)
+    if created_secret and on_client_secret is not None:
+        on_client_secret(created_secret)
     used_patient = patient_id or await _ensure_patient(http, root, token)
     created_appointments = await _ensure_appointments(http, root, token, used_patient, now)
     await _post_bundle(http, root, token, build_chart_bundle(used_patient, now))
@@ -329,10 +331,11 @@ async def _resolve_user(
         f"{system}/User", params={"email": seed_user_email}, headers=_headers(bearer)
     )
     _raise_for_user(response, "look up")
-    found = _first_entry(response)
-    if found and found.get("id"):
-        logger.info("reusing the patient user")
-        return str(found["id"]), "existing"
+    wanted = seed_user_email.casefold()
+    for found in _entries(response):
+        if found.get("id") and str(found.get("email") or "").casefold() == wanted:
+            logger.info("reusing the patient user")
+            return str(found["id"]), "existing"
     logger.info("inviting the patient user")
     created = await http.post(
         f"{system}/User", json=build_user(seed_user_email), headers=_headers(bearer)
@@ -438,6 +441,14 @@ async def _ensure_membership(
     if found and found.get("id") and _membership_patient(found) == patient_id:
         logger.info("reusing the membership")
         return str(found["id"])
+    if found and found.get("id") and _membership_patient(found) is None:
+        link = found.get("link")
+        target = link.get("reference") if isinstance(link, dict) else None
+        kind = str(target).split("/", 1)[0] if target else "nothing"
+        raise RuntimeError(
+            f"this user's Membership links to {kind}, not a Patient. The seed will not "
+            "relink it. Use a separate patient user (SEED_USER_EMAIL)."
+        )
     membership = build_membership(user_id, patient_id)
     if found and found.get("id"):
         logger.info("linking the membership to the seed patient")
@@ -499,12 +510,19 @@ async def _put(http: httpx.AsyncClient, url: str, token: str, resource: Json) ->
 
 
 def _first_entry(response: httpx.Response) -> Json | None:
+    entries = _entries(response)
+    return entries[0] if entries else None
+
+
+def _entries(response: httpx.Response) -> list[Json]:
     body = response.json()
     entries = body.get("entry") if isinstance(body, dict) else None
-    if not entries or not isinstance(entries[0], dict):
-        return None
-    resource = entries[0].get("resource")
-    return resource if isinstance(resource, dict) else None
+    resources: list[Json] = []
+    for entry in entries or []:
+        resource = entry.get("resource") if isinstance(entry, dict) else None
+        if isinstance(resource, dict):
+            resources.append(resource)
+    return resources
 
 
 def _membership_patient(resource: Json) -> str | None:
@@ -550,14 +568,19 @@ async def _ensure_appointments(
     created = 0
     for appointment in build_appointments(patient_id, now):
         value = str(appointment["identifier"][0]["value"])
-        found = await _total(
+        found = await _first(
             http,
             base,
             token,
             "Appointment",
             {"patient": patient_id, "identifier": f"{SEED_SYSTEM}|{value}"},
         )
-        if found:
+        if found and found.get("id"):
+            # Reruns move the start so the +3/+14/+45 day spread stays relative to now.
+            existing_id = str(found["id"])
+            await _put(
+                http, f"{base}/Appointment/{existing_id}", token, {**appointment, "id": existing_id}
+            )
             continue
         response = await http.post(
             f"{base}/Appointment",
@@ -619,6 +642,18 @@ async def _post_bundle(
     logger.debug("POST bundle status=%s", response.status_code)
     if response.status_code >= 400:
         raise RuntimeError(f"bundle post failed ({response.status_code})")
+    body = response.json()
+    entries = body.get("entry") if isinstance(body, dict) else None
+    statuses = [
+        str((entry.get("response") or {}).get("status", ""))
+        for entry in entries or []
+        if isinstance(entry, dict)
+    ]
+    failed = [status for status in statuses if status[:1] in ("4", "5")]
+    if failed:
+        raise RuntimeError(
+            f"{len(failed)} of {len(statuses)} batch entries failed: {', '.join(failed)}"
+        )
 
 
 def _appointment(patient_id: str, value: str, status: str, start: datetime) -> Json:

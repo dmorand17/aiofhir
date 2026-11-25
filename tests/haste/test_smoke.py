@@ -138,3 +138,100 @@ async def test_run_smoke_explains_a_token_without_a_patient() -> None:
         )
         with pytest.raises(SignInError, match="patient user"):
             await run_smoke(BASE, "aiofhir-smoke", None, "auth-code", "verifier-1")
+
+
+async def test_run_smoke_hands_out_the_exchanged_and_refreshed_tokens() -> None:
+    from aiofhir.smart import TokenSet
+
+    seen: list[TokenSet] = []
+
+    async def keep(tokens: TokenSet) -> None:
+        seen.append(tokens)
+
+    with respx.mock:
+        respx.get(f"{BASE}/.well-known/smart-configuration").respond(200, json=_config())
+        respx.post(TOKEN).mock(
+            side_effect=[
+                httpx.Response(
+                    200,
+                    json={
+                        "access_token": "access-1",
+                        "refresh_token": "refresh-1",
+                        "expires_in": 3600,
+                        "patient": "pt-1",
+                    },
+                ),
+                httpx.Response(
+                    200,
+                    json={
+                        "access_token": "access-2",
+                        "refresh_token": "refresh-2",
+                        "expires_in": 3600,
+                        "patient": "pt-1",
+                    },
+                ),
+            ]
+        )
+        for resource in (
+            "Appointment",
+            "MedicationRequest",
+            "AllergyIntolerance",
+            "Condition",
+            "Observation",
+        ):
+            respx.get(f"{BASE}/{resource}").respond(
+                200, json={"resourceType": "Bundle", "entry": []}
+            )
+        await run_smoke(BASE, "aiofhir-smoke", None, "auth-code", "verifier-1", on_tokens=keep)
+    assert [t.refresh_token for t in seen] == ["refresh-1", "refresh-2"]
+    assert seen[-1].patient == "pt-1"
+
+
+def test_saved_tokens_round_trip_and_are_owner_only(tmp_path: object) -> None:
+    import stat
+    from pathlib import Path
+
+    from aiofhir.smart import TokenSet
+    from haste.login import load_tokens, save_tokens
+
+    assert isinstance(tmp_path, Path)
+    path = tmp_path / ".tokens.json"
+    path.write_text("{}")
+    path.chmod(0o644)
+    tokens = TokenSet.from_dict(
+        {
+            "access_token": "a",
+            "refresh_token": "r",
+            "expires_at": "2026-01-01T00:00:00+00:00",
+            "patient": "pt-1",
+            "scope": "s",
+        }
+    )
+    save_tokens(path, tokens)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    loaded = load_tokens(path)
+    assert loaded.patient == "pt-1"
+    assert loaded.refresh_token == "r"
+
+
+async def test_stray_connections_do_not_end_the_sign_in() -> None:
+    import asyncio
+
+    server, future = await capture_callback("state-1", port=0, host="127.0.0.1")
+    sockets = server.sockets
+    assert sockets is not None
+    port = sockets[0].getsockname()[1]
+    async with server:
+        _reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        writer.close()
+        await writer.wait_closed()
+        async with httpx.AsyncClient() as http:
+            stray = await http.get(f"http://127.0.0.1:{port}/favicon.ico")
+            await asyncio.sleep(0.05)
+            assert not future.done()
+            await http.get(
+                f"http://127.0.0.1:{port}/callback",
+                params={"code": "auth-code", "state": "state-1"},
+            )
+        assert stray.status_code == 404
+        assert await future == "auth-code"

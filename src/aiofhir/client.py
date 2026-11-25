@@ -120,6 +120,7 @@ class FhirClient:
         url: str | None = f"{self._base}/{resource_type}"
         query: dict[str, list[str]] | None = adapted or None
         pages = 0
+        by_link = False
         while url is not None and pages < max_pages:
             response = await self._send("GET", url, params=query)
             body = response.json()
@@ -128,7 +129,16 @@ class FhirClient:
             nxt = _next_link(body, url)
             truncated = False
             if nxt is None:
-                url = None
+                # Servers without `next` links (Haste) page by parameters instead.
+                following = None if by_link else self.profile.next_page(query or {}, len(resources))
+                if following is None:
+                    url = None
+                elif pages >= max_pages:
+                    logger.debug("stopping after %s pages", max_pages)
+                    truncated = True
+                    url = None
+                else:
+                    query = following
             elif not _within_base(self._base, nxt):
                 logger.debug("ignoring next link outside the FHIR base")
                 warnings = [*warnings, _OUTSIDE_BASE]
@@ -140,6 +150,7 @@ class FhirClient:
             else:
                 url = nxt
                 query = None
+                by_link = True
             yield SearchResult(tuple(resources), tuple(warnings), truncated)
 
     async def _send(
