@@ -1,0 +1,250 @@
+"""Async FHIR R4 read and search client."""
+
+from __future__ import annotations
+
+import asyncio
+import random
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any, Protocol
+from urllib.parse import urljoin, urlsplit
+
+import httpx
+
+from aiofhir.errors import AuthExpired, FhirError
+from aiofhir.profiles.base import ServerProfile
+from aiofhir.profiles.generic import GenericProfile
+
+Json = dict[str, Any]
+Params = Mapping[str, str | Sequence[str]]
+Sleep = Callable[[float], Awaitable[None]]
+Uniform = Callable[[float, float], float]
+_RETRYABLE = frozenset({429, 502, 503, 504})
+_MAX_RETRY_WAIT = 30.0
+
+
+class TokenProvider(Protocol):
+    async def get(self) -> str: ...
+
+    async def refresh(self) -> str: ...
+
+
+@dataclass(frozen=True)
+class SearchResult:
+    resources: tuple[Json, ...]
+    warnings: tuple[str, ...]
+    truncated: bool
+
+
+class FhirClient:
+    """Reads and searches one FHIR base, with retries and a concurrency cap."""
+
+    def __init__(
+        self,
+        fhir_base_url: str,
+        provider: TokenProvider,
+        profile: ServerProfile | None = None,
+        max_concurrency: int = 4,
+        timeout: float = 10.0,
+        sleep: Sleep = asyncio.sleep,
+        uniform: Uniform = random.uniform,
+    ) -> None:
+        self._base = fhir_base_url.rstrip("/")
+        self._provider = provider
+        self.profile = profile or GenericProfile()
+        self._semaphore = asyncio.Semaphore(max_concurrency)
+        self._timeout = timeout
+        self._sleep = sleep
+        self._uniform = uniform
+        self._http: httpx.AsyncClient | None = None
+
+    async def __aenter__(self) -> FhirClient:
+        self._http = httpx.AsyncClient(timeout=self._timeout)
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        if self._http is not None:
+            await self._http.aclose()
+            self._http = None
+
+    async def read(self, resource_type: str, resource_id: str) -> Json:
+        response = await self._send("GET", f"{self._base}/{resource_type}/{resource_id}")
+        body = response.json()
+        if not isinstance(body, dict):
+            raise FhirError(response.status_code, "response was not a JSON object")
+        return body
+
+    async def search(
+        self,
+        resource_type: str,
+        params: Params | None = None,
+        max_pages: int = 10,
+    ) -> SearchResult:
+        resources: list[Json] = []
+        warnings: list[str] = []
+        truncated = False
+        async for page in self._pages(resource_type, params, max_pages):
+            resources.extend(page.resources)
+            warnings.extend(page.warnings)
+            truncated = page.truncated
+        return SearchResult(tuple(resources), tuple(warnings), truncated)
+
+    async def iter_search(
+        self,
+        resource_type: str,
+        params: Params | None = None,
+        max_pages: int = 10,
+    ) -> AsyncIterator[Json]:
+        async for page in self._pages(resource_type, params, max_pages):
+            for resource in page.resources:
+                yield resource
+
+    async def _pages(
+        self,
+        resource_type: str,
+        params: Params | None,
+        max_pages: int,
+    ) -> AsyncIterator[SearchResult]:
+        adapted = self.profile.adapt_search(resource_type, _normalize(params))
+        url: str | None = f"{self._base}/{resource_type}"
+        query: dict[str, list[str]] | None = adapted or None
+        pages = 0
+        while url is not None and pages < max_pages:
+            response = await self._send("GET", url, params=query)
+            body = response.json()
+            resources, warnings = _bundle_entries(body)
+            pages += 1
+            nxt = _next_link(body, url)
+            truncated = False
+            if nxt is None:
+                url = None
+            elif not _same_origin(self._base, nxt):
+                warnings = [*warnings, "ignored cross-origin next link"]
+                url = None
+            elif pages >= max_pages:
+                truncated = True
+                url = None
+            else:
+                url = nxt
+                query = None
+            yield SearchResult(tuple(resources), tuple(warnings), truncated)
+
+    async def _send(
+        self,
+        method: str,
+        url: str,
+        params: dict[str, list[str]] | None = None,
+    ) -> httpx.Response:
+        if self._http is None:
+            raise FhirError(0, "client is not open")
+        retries = 0
+        refreshed = False
+        while True:
+            token = await self._provider.get()
+            headers = {"Authorization": f"Bearer {token}", "Accept": "application/fhir+json"}
+            try:
+                async with self._semaphore:
+                    response = await asyncio.wait_for(
+                        self._http.request(method, url, params=params, headers=headers),
+                        self._timeout,
+                    )
+            except TimeoutError as exc:
+                raise FhirError(0, "request timed out") from exc
+            except httpx.HTTPError as exc:
+                raise FhirError(0, "request failed") from exc
+            if response.status_code == 401:
+                if not refreshed:
+                    refreshed = True
+                    await self._provider.refresh()
+                    continue
+                raise AuthExpired()
+            if response.status_code in _RETRYABLE and retries < 2:
+                await self._sleep(self._delay(response, retries))
+                retries += 1
+                continue
+            if response.status_code >= 400:
+                raise FhirError(response.status_code, _error_text(response))
+            return response
+
+    def _delay(self, response: httpx.Response, attempt: int) -> float:
+        header = response.headers.get("Retry-After")
+        if header is not None and header.strip().isdigit():
+            return min(float(header), _MAX_RETRY_WAIT)
+        jitter = float(self._uniform(0.5, 1.0))
+        backoff = 0.5 * (2.0**attempt) * jitter
+        return min(_MAX_RETRY_WAIT, backoff)
+
+
+def _normalize(params: Params | None) -> dict[str, list[str]]:
+    if not params:
+        return {}
+    normalized: dict[str, list[str]] = {}
+    for key, value in params.items():
+        if isinstance(value, str):
+            normalized[key] = [value]
+        else:
+            normalized[key] = [str(item) for item in value]
+    return normalized
+
+
+def _bundle_entries(body: object) -> tuple[list[Json], list[str]]:
+    if not isinstance(body, dict):
+        return [], []
+    if body.get("resourceType") == "OperationOutcome":
+        return [], _outcome_messages(body)
+    resources: list[Json] = []
+    warnings: list[str] = []
+    for entry in body.get("entry") or []:
+        if not isinstance(entry, dict):
+            continue
+        resource = entry.get("resource")
+        if not isinstance(resource, dict):
+            continue
+        if resource.get("resourceType") == "OperationOutcome":
+            warnings.extend(_outcome_messages(resource))
+        else:
+            resources.append(resource)
+    return resources, warnings
+
+
+def _outcome_messages(resource: Json) -> list[str]:
+    messages: list[str] = []
+    for issue in resource.get("issue") or []:
+        if not isinstance(issue, dict):
+            continue
+        diagnostics = issue.get("diagnostics")
+        if isinstance(diagnostics, str) and diagnostics:
+            messages.append(diagnostics)
+            continue
+        details = issue.get("details")
+        text = details.get("text") if isinstance(details, dict) else None
+        if isinstance(text, str) and text:
+            messages.append(text)
+    return messages or ["OperationOutcome"]
+
+
+def _next_link(body: object, current: str) -> str | None:
+    if not isinstance(body, dict):
+        return None
+    for link in body.get("link") or []:
+        if not isinstance(link, dict) or link.get("relation") != "next":
+            continue
+        target = link.get("url")
+        if isinstance(target, str) and target:
+            return urljoin(current, target)
+    return None
+
+
+def _same_origin(base: str, url: str) -> bool:
+    left, right = urlsplit(base), urlsplit(url)
+    return (left.scheme, left.netloc) == (right.scheme, right.netloc)
+
+
+def _error_text(response: httpx.Response) -> str:
+    try:
+        body = response.json()
+    except ValueError:
+        return response.reason_phrase
+    if isinstance(body, dict) and body.get("resourceType") == "OperationOutcome":
+        return "; ".join(_outcome_messages(body))
+    return response.reason_phrase
