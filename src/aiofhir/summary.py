@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 
 @dataclass(frozen=True)
@@ -43,7 +43,7 @@ class Summary:
         text = "\n".join([self.kind, *chosen])
         if hidden:
             text += f"\n(+{hidden} more)"
-        return text
+        return text[:max_chars]
 
 
 def mark_data(text: str) -> str:
@@ -53,6 +53,21 @@ def mark_data(text: str) -> str:
 
 
 def _line(item: Item) -> str:
+    pieces = ["-"]
     if item.text:
-        return f"- {mark_data(item.text)} ({item.citation})"
-    return f"- ({item.citation})"
+        pieces.append(mark_data(item.text))
+    when = iso_when(item.at)
+    if when:
+        pieces.append(when)
+    pieces.append(f"({item.citation})")
+    return " ".join(pieces)
+
+
+def iso_when(value: datetime | date | None) -> str:
+    """ISO 8601 for model-facing text: UTC instants and plain dates. Never local time."""
+    if isinstance(value, datetime):
+        aware = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return aware.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if isinstance(value, date):
+        return value.isoformat()
+    return ""

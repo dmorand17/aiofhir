@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,6 +12,7 @@ from aiofhir.errors import DiscoveryError
 from aiofhir.profiles.base import ServerProfile
 
 _cache: dict[str, SmartConfiguration] = {}
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -35,14 +37,18 @@ async def discover(
     key = base.rstrip("/")
     cached = _cache.get(key)
     if cached is not None:
+        logger.debug("using cached SMART configuration for %s", key)
         return cached
     last_error: Exception | None = None
     for url in profile.discovery_paths(base):
+        logger.debug("GET %s", url)
         try:
             response = await http.get(url)
         except httpx.HTTPError as exc:
+            logger.debug("SMART configuration request failed for %s", url)
             last_error = exc
             continue
+        logger.debug("SMART configuration %s status=%s", url, response.status_code)
         if response.status_code != 200:
             last_error = DiscoveryError(f"{url} returned {response.status_code}")
             continue
@@ -50,6 +56,7 @@ async def discover(
         if "S256" not in configuration.code_challenge_methods_supported:
             raise DiscoveryError("SMART configuration does not support S256 PKCE")
         _cache[key] = configuration
+        logger.info("discovered SMART configuration for %s", key)
         return configuration
     raise DiscoveryError("SMART discovery failed") from last_error
 

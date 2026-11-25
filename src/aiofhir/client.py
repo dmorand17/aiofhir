@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
+import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -12,6 +14,7 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 
 from aiofhir.errors import AuthExpired, FhirError
+from aiofhir.log import redact_params, redact_url
 from aiofhir.profiles.base import ServerProfile
 from aiofhir.profiles.generic import GenericProfile
 
@@ -21,12 +24,16 @@ Sleep = Callable[[float], Awaitable[None]]
 Uniform = Callable[[float, float], float]
 _RETRYABLE = frozenset({429, 502, 503, 504})
 _MAX_RETRY_WAIT = 30.0
+_OUTSIDE_BASE = "ignored next link outside the FHIR base (cross-origin or another path)"
+_RESOURCE_TYPE = re.compile(r"^[A-Z][A-Za-z]{1,63}$")
+_RESOURCE_ID = re.compile(r"^[A-Za-z0-9\-.]{1,64}$")
+logger = logging.getLogger(__name__)
 
 
 class TokenProvider(Protocol):
     async def get(self) -> str: ...
 
-    async def refresh(self) -> str: ...
+    async def refresh(self, stale: str | None = None) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -68,6 +75,9 @@ class FhirClient:
             self._http = None
 
     async def read(self, resource_type: str, resource_id: str) -> Json:
+        check_resource_type(resource_type)
+        if not _RESOURCE_ID.match(resource_id) or resource_id in {".", ".."}:
+            raise ValueError("not a valid FHIR resource id")
         response = await self._send("GET", f"{self._base}/{resource_type}/{resource_id}")
         body = response.json()
         if not isinstance(body, dict):
@@ -105,10 +115,12 @@ class FhirClient:
         params: Params | None,
         max_pages: int,
     ) -> AsyncIterator[SearchResult]:
+        check_resource_type(resource_type)
         adapted = self.profile.adapt_search(resource_type, _normalize(params))
         url: str | None = f"{self._base}/{resource_type}"
         query: dict[str, list[str]] | None = adapted or None
         pages = 0
+        by_link = False
         while url is not None and pages < max_pages:
             response = await self._send("GET", url, params=query)
             body = response.json()
@@ -117,16 +129,28 @@ class FhirClient:
             nxt = _next_link(body, url)
             truncated = False
             if nxt is None:
-                url = None
-            elif not _same_origin(self._base, nxt):
-                warnings = [*warnings, "ignored cross-origin next link"]
+                # Servers without `next` links (Haste) page by parameters instead.
+                following = None if by_link else self.profile.next_page(query or {}, len(resources))
+                if following is None:
+                    url = None
+                elif pages >= max_pages:
+                    logger.debug("stopping after %s pages", max_pages)
+                    truncated = True
+                    url = None
+                else:
+                    query = following
+            elif not _within_base(self._base, nxt):
+                logger.debug("ignoring next link outside the FHIR base")
+                warnings = [*warnings, _OUTSIDE_BASE]
                 url = None
             elif pages >= max_pages:
+                logger.debug("stopping after %s pages", max_pages)
                 truncated = True
                 url = None
             else:
                 url = nxt
                 query = None
+                by_link = True
             yield SearchResult(tuple(resources), tuple(warnings), truncated)
 
     async def _send(
@@ -139,9 +163,12 @@ class FhirClient:
             raise FhirError(0, "client is not open")
         retries = 0
         refreshed = False
+        safe_url = redact_url(url)
+        safe_params = redact_params(params)
         while True:
             token = await self._provider.get()
             headers = {"Authorization": f"Bearer {token}", "Accept": "application/fhir+json"}
+            logger.debug("%s %s params=%s", method, safe_url, safe_params)
             try:
                 async with self._semaphore:
                     response = await asyncio.wait_for(
@@ -149,16 +176,23 @@ class FhirClient:
                         self._timeout,
                     )
             except TimeoutError as exc:
+                logger.debug("%s %s timed out", method, safe_url)
                 raise FhirError(0, "request timed out") from exc
             except httpx.HTTPError as exc:
+                logger.debug("%s %s failed", method, safe_url)
                 raise FhirError(0, "request failed") from exc
+            logger.debug("%s %s status=%s", method, safe_url, response.status_code)
             if response.status_code == 401:
                 if not refreshed:
+                    logger.info("received 401; refreshing the access token")
                     refreshed = True
-                    await self._provider.refresh()
+                    await self._provider.refresh(token)
                     continue
                 raise AuthExpired()
             if response.status_code in _RETRYABLE and retries < 2:
+                logger.info(
+                    "retrying %s %s after status %s", method, safe_url, response.status_code
+                )
                 await self._sleep(self._delay(response, retries))
                 retries += 1
                 continue
@@ -235,9 +269,26 @@ def _next_link(body: object, current: str) -> str | None:
     return None
 
 
-def _same_origin(base: str, url: str) -> bool:
+def check_resource_type(resource_type: str) -> None:
+    if not _RESOURCE_TYPE.match(resource_type):
+        raise ValueError("not a valid FHIR resource type")
+
+
+def _within_base(base: str, url: str) -> bool:
+    """Same scheme and host, and a path under the FHIR base.
+
+    Multi-tenant servers such as Haste share one host across tenants
+    (`/w/{tenant}/{project}/...`), so the origin alone is not enough.
+    Dot segments are rejected so `base/../other` cannot climb out.
+    """
     left, right = urlsplit(base), urlsplit(url)
-    return (left.scheme, left.netloc) == (right.scheme, right.netloc)
+    if (left.scheme, left.netloc.lower()) != (right.scheme, right.netloc.lower()):
+        return False
+    segments = right.path.split("/")
+    if ".." in segments or "." in segments:
+        return False
+    prefix = left.path.rstrip("/")
+    return right.path == prefix or right.path.startswith(prefix + "/")
 
 
 def _error_text(response: httpx.Response) -> str:

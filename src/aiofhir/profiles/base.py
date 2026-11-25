@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -27,19 +28,30 @@ class ServerProfile:
         del resource
         return {key: list(values) for key, values in params.items()}
 
+    def next_page(
+        self,
+        params: Mapping[str, Sequence[str]],
+        received: int,
+    ) -> dict[str, list[str]] | None:
+        """Search params for the page after one that had no `next` link, or None to stop."""
+        del params, received
+        return None
+
     async def resolve_medication(self, request: Mapping[str, Any], read: ReadResource) -> str:
         concept = request.get("medicationCodeableConcept")
         if isinstance(concept, dict):
             return code_text(concept)
-        reference = _reference(request.get("medicationReference"))
+        value = request.get("medicationReference")
+        reference = _reference(value)
+        display = _display(value)
         if reference.startswith("#"):
             contained = _contained(request, reference[1:])
-            return code_text(contained.get("code")) if contained else reference
-        if reference:
-            medication_id = reference.rsplit("/", 1)[-1]
+            return code_text(contained.get("code")) if contained else display
+        medication_id = medication_reference_id(reference)
+        if medication_id is not None:
             medication = await read("Medication", medication_id)
-            return code_text(medication.get("code"))
-        return ""
+            return code_text(medication.get("code")) or display
+        return display
 
 
 def discovery_fallback(base: str, tenant_project_path: str) -> str | None:
@@ -65,6 +77,28 @@ def code_text(concept: object) -> str:
         display = coding.get("display") or coding.get("code")
         if isinstance(display, str) and display:
             return display
+    return ""
+
+
+_RELATIVE_MEDICATION = re.compile(
+    r"^Medication/([A-Za-z0-9\-.]{1,64})(?:/_history/[A-Za-z0-9\-.]{1,64})?$"
+)
+
+
+def medication_reference_id(reference: str) -> str | None:
+    """The id in a relative `Medication/{id}[/_history/{v}]` reference, else None.
+
+    Absolute URLs (another server) and anything else are not followed.
+    """
+    match = _RELATIVE_MEDICATION.match(reference.strip())
+    if match is None or match.group(1) in {".", ".."}:
+        return None
+    return match.group(1)
+
+
+def _display(value: object) -> str:
+    if isinstance(value, dict) and isinstance(value.get("display"), str):
+        return str(value["display"])
     return ""
 
 

@@ -5,12 +5,15 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Protocol
 
 from aiofhir.errors import AuthExpired
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -47,7 +50,7 @@ class TokenSet:
         return cls(
             access_token=str(data["access_token"]),
             refresh_token=_optional_str(data.get("refresh_token")),
-            expires_at=datetime.fromisoformat(str(data["expires_at"])),
+            expires_at=_aware(datetime.fromisoformat(str(data["expires_at"]))),
             scope=str(data.get("scope") or ""),
             patient=_optional_str(data.get("patient")),
             encounter=_optional_str(data.get("encounter")),
@@ -57,12 +60,21 @@ class TokenSet:
         )
 
 
+class RefreshExchanger(Protocol):
+    async def exchange_refresh(
+        self,
+        refresh_token: str,
+        scope: str,
+        previous: TokenSet | None = None,
+    ) -> TokenSet: ...
+
+
 class RefreshingToken:
     """Hands out an access token, refreshing 60 seconds early under one lock."""
 
     def __init__(
         self,
-        smart: Any,
+        smart: RefreshExchanger,
         tokens: TokenSet,
         on_refresh: Callable[[TokenSet], Awaitable[None]] | None = None,
         clock: Callable[[], datetime] | None = None,
@@ -82,10 +94,21 @@ class RefreshingToken:
             await self._refresh_locked()
         return self._tokens.access_token
 
-    async def refresh(self) -> str:
+    async def refresh(self, stale: str | None = None) -> str:
+        """Force a refresh. Pass the token that was rejected as `stale`.
+
+        When several requests get a 401 for the same token, only the first one
+        refreshes; the rest see the token already changed and reuse it.
+        """
         async with self._lock:
+            if stale is not None and stale != self._tokens.access_token:
+                return self._tokens.access_token
             await self._refresh_locked()
         return self._tokens.access_token
+
+    @property
+    def tokens(self) -> TokenSet:
+        return self._tokens
 
     def _expiring(self) -> bool:
         return self._tokens.expires_at <= self._clock() + timedelta(seconds=60)
@@ -93,9 +116,11 @@ class RefreshingToken:
     async def _refresh_locked(self) -> None:
         if not self._tokens.refresh_token:
             raise AuthExpired()
+        logger.info("access token expires within 60s; refreshing")
         refreshed = await self._smart.exchange_refresh(
             self._tokens.refresh_token,
             self._tokens.scope,
+            self._tokens,
         )
         self._tokens = refreshed
         if self._on_refresh is not None:
@@ -116,6 +141,11 @@ def fhir_user_from_id_token(id_token: str | None) -> str | None:
         return None
     fhir_user = payload.get("fhirUser")
     return fhir_user if isinstance(fhir_user, str) else None
+
+
+def _aware(value: datetime) -> datetime:
+    """Treat a stored timestamp without a zone as UTC."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 def _optional_str(value: object) -> str | None:

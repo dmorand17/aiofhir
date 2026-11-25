@@ -1,0 +1,150 @@
+{
+  "resourceType": "Bundle",
+  "type": "batch",
+  "entry": [
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "Appointment?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "Encounter?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "Observation?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "Condition?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "Procedure?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "AllergyIntolerance?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "Immunization?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "DiagnosticReport?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "CarePlan?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "CareTeam?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "MedicationRequest?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "MedicationAdministration?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "MedicationDispense?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "Medication?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "ServiceRequest?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "DocumentReference?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "Claim?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "Coverage?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "RelatedPerson?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "PractitionerRole?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "Patient?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "Practitioner?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "Location?identifier=https://livekit.io/demo/seed|"
+      }
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "Organization?identifier=https://livekit.io/demo/seed|"
+      }
+    }
+  ]
+}

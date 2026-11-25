@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from aiofhir.errors import DiscoveryError
 from aiofhir.smart.discovery import SmartConfiguration
 
@@ -14,6 +16,7 @@ READ_RESOURCES: tuple[str, ...] = (
     "Condition",
     "Observation",
 )
+logger = logging.getLogger(__name__)
 
 
 def scopes_from_capabilities(configuration: SmartConfiguration) -> str:
@@ -33,7 +36,9 @@ def scopes_from_capabilities(configuration: SmartConfiguration) -> str:
     refresh = _refresh_scope(capabilities, supported)
     if refresh is not None:
         parts.append(refresh)
-    return " ".join(parts)
+    scope = " ".join(parts)
+    logger.debug("derived scope %s", scope)
+    return scope
 
 
 def _permission(capabilities: set[str], supported: tuple[str, ...] | None) -> str:

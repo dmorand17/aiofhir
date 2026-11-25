@@ -1,0 +1,27 @@
+{
+  "resourceType": "Bundle",
+  "type": "transaction",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "ClientApplication",
+        "id": "aiofhir-seed",
+        "name": "aiofhir seed",
+        "description": "Public client used to sign in before the smoke client exists.",
+        "grantType": [
+          "authorization_code",
+          "refresh_token"
+        ],
+        "responseTypes": "code",
+        "redirectUri": [
+          "http://localhost:8765/callback"
+        ],
+        "scope": "user/*.cruds openid fhirUser"
+      },
+      "request": {
+        "method": "PUT",
+        "url": "ClientApplication/aiofhir-seed"
+      }
+    }
+  ]
+}

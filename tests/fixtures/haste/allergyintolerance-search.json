@@ -1,0 +1,34 @@
+{
+  "entry": [
+    {
+      "resource": {
+        "clinicalStatus": {
+          "coding": [
+            {
+              "code": "active"
+            }
+          ]
+        },
+        "code": {
+          "text": "Peanut"
+        },
+        "id": "allergy-peanut",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "allergy-peanut"
+          }
+        ],
+        "patient": {
+          "reference": "Patient/example-patient"
+        },
+        "resourceType": "AllergyIntolerance"
+      },
+      "search": {
+        "mode": "match"
+      }
+    }
+  ],
+  "resourceType": "Bundle",
+  "type": "searchset"
+}

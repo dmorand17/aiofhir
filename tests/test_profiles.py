@@ -113,7 +113,7 @@ class _Tokens:
     async def get(self) -> str:
         return "token"
 
-    async def refresh(self) -> str:
+    async def refresh(self, stale: str | None = None) -> str:
         return "token"
 
 
