@@ -3,7 +3,7 @@
 `aiofhir` is a thin **async FHIR R4 and SMART on FHIR client** for Python, built on httpx. It handles patient sign-in (`aiofhir.smart`), reading and searching, and patient-scoped helpers that return compact, cited summaries. It has **no LiveKit dependency**. LiveKit tools live in each demo repo.
 
 - **Why async httpx:** LiveKit agents run on asyncio, so a blocking client would stall the event loop during FHIR calls and token refreshes. httpx gives pooling, timeouts, HTTP/2 and a mockable transport (respx).
-- **Status:** pre-release. Phase 0 is complete. Phase 1 is in progress on `cursor/phase-1-client`: the client is not implemented yet, and the GitHub Actions run and PyPI name reservation moved here from Phase 0. Nothing has run against a live server. Check a phase item only when its code and tests pass.
+- **Status:** pre-release. Phase 0 is complete. Phase 1 is in progress on `cursor/phase-1-client`: the client is not implemented yet. The PyPI name is reserved as 0.0.0. Nothing has run against a live server. Check a phase item only when its code and tests pass.
 
 ## Principles
 - **Patient scoping.**
@@ -85,7 +85,7 @@ These are the SMART configuration fields, not the FHIR `/metadata` CapabilitySta
 
 **Phase 1: Build the core (2.5 d).** Left off after the failing tests. `src/aiofhir` is still only `__init__.py`.
 - [x] GitHub Actions is green on this branch.
-- [ ] Reserve the PyPI name `aiofhir`.
+- [x] Reserve the PyPI name `aiofhir`. Published 0.0.0 to https://pypi.org/project/aiofhir/.
 - [ ] **Discovery:** fallback paths come from the profile; S256 is required; results are cached.
   - *Tests:* Haste returns 404 on the primary path and 200 on the fallback; every path failing raises `DiscoveryError`.
 - [ ] **Scopes:** `scopes_from_capabilities(cfg)` follows the Scopes table. Profiles do not override it. An explicit `scope=` replaces the derived string.
