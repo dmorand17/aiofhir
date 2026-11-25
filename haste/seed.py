@@ -15,6 +15,13 @@ overrides the derived /w/{tenant}/system/api/v1/fhir.
 
 When the seed creates the aiofhir-smoke client, its secret is saved to .env as
 SMOKE_CLIENT_SECRET (mode 600) and not printed.
+
+The admin seed client (aiofhir-seed, user/*.cruds) is made confidential at the
+end of every run: when it has no secret yet, a new one is saved to .env as
+CLIENT_SECRET (mode 600) and set on the client, and its refresh grant is
+dropped. Later runs sign in with that secret. `python -m haste.seed
+--cleanup-client` (`just seed-cleanup`) deletes the client instead; post
+bundles/create-seed-client.json again to re-seed.
 SYNTHEA_DIR loads that directory's information files on every run.
 The bundle entries use ifNoneExist, so an existing index is left in place.
 
@@ -41,7 +48,14 @@ from aiofhir.profiles import HasteProfile
 from aiofhir.scrub import scrub
 from aiofhir.smart.discovery import discover
 from haste.login import SEED_LOGIN_SCOPE, login_access_token, save_env_value
-from haste.seeding import CLIENT_ID, SeedUserError, apply_seed
+from haste.seeding import (
+    CLIENT_ID,
+    SEED_CLIENT_ID,
+    SeedUserError,
+    apply_seed,
+    delete_seed_client,
+    secure_seed_client,
+)
 
 _ROOT = Path(__file__).resolve().parents[1]
 logger = logging.getLogger("haste.seed")
@@ -74,7 +88,8 @@ def _optional_bundle(directory: str, prefix: str) -> dict[str, Any] | None:
     return loaded
 
 
-async def _token() -> str:
+async def admin_token() -> str:
+    """The admin token: HASTE_TOKEN, or a browser sign-in with CLIENT_ID."""
     load_dotenv(_ROOT / ".env")
     load_dotenv(_ROOT / "haste" / ".env")
     token = os.environ.get("HASTE_TOKEN", "").strip()
@@ -101,10 +116,60 @@ def _save_client_secret(secret: str) -> None:
     save_env_value(_ROOT / ".env", "SMOKE_CLIENT_SECRET", secret)
 
 
+def _save_seed_client_secret(secret: str) -> None:
+    """Saved before the client is changed, so the next sign-in has it."""
+    save_env_value(_ROOT / ".env", "CLIENT_SECRET", secret)
+
+
+def _seed_client_id() -> str | None:
+    """The admin client this run may lock: aiofhir-seed, unless CLIENT_ID names another."""
+    client_id = os.environ.get("CLIENT_ID", "").strip()
+    if client_id and client_id != SEED_CLIENT_ID:
+        return None
+    return SEED_CLIENT_ID
+
+
+async def _lock_seed_client(http: httpx.AsyncClient, base: str, token: str) -> str:
+    client_id = _seed_client_id()
+    if client_id is None:
+        return (
+            f"left as is (CLIENT_ID={os.environ.get('CLIENT_ID', '').strip()}); "
+            "make sure it is confidential or limited to admins"
+        )
+    status = await secure_seed_client(
+        http,
+        base,
+        token,
+        new_secret=secrets.token_urlsafe(32),
+        on_secret=_save_seed_client_secret,
+        client_id=client_id,
+    )
+    if status == "locked":
+        return f"{client_id} locked; its new secret is in .env as CLIENT_SECRET"
+    if status == "confidential":
+        return f"{client_id} already confidential"
+    return f"{client_id} not found"
+
+
+async def _cleanup_client() -> None:
+    configure_cli_logging()
+    base = _env("BASE")
+    token = await admin_token()
+    async with httpx.AsyncClient(timeout=30.0) as http:
+        deleted = await delete_seed_client(http, base, token)
+    if deleted:
+        print(
+            f"Deleted ClientApplication/{SEED_CLIENT_ID}. Remove CLIENT_SECRET from .env. "
+            "To seed again, post haste/bundles/create-seed-client.json first."
+        )
+    else:
+        print(f"ClientApplication/{SEED_CLIENT_ID} was already gone.")
+
+
 async def _main() -> None:
     configure_cli_logging()
     base = _env("BASE")
-    token = await _token()
+    token = await admin_token()
     synthea = os.environ.get("SYNTHEA_DIR", "").strip()
     logger.info("seeding %s", base.rstrip("/"))
     async with httpx.AsyncClient(timeout=30.0) as http:
@@ -129,6 +194,7 @@ async def _main() -> None:
         except SeedUserError as exc:
             print(f"Patient user: {exc}", file=sys.stderr)
             raise SystemExit(1) from exc
+        seed_client = await _lock_seed_client(http, base, token)
     if result.patient_id:
         save_env_value(_ROOT / ".env", "PATIENT_ID", result.patient_id)
     lines = [f"patient_id: {result.patient_id}", f"client_id: {CLIENT_ID}"]
@@ -143,8 +209,14 @@ async def _main() -> None:
         lines.append("  accept the invitation email before running the smoke script")
     lines.append("membership: linked" if result.membership_linked else "membership: skipped")
     lines.append(f"read_policy: {'assigned' if result.policy_assigned else 'skipped'}")
+    lines.append(f"seed_client: {seed_client}")
     print(scrub("\n".join(lines)))
 
 
 if __name__ == "__main__":
-    asyncio.run(_main())
+    if sys.argv[1:] == ["--cleanup-client"]:
+        asyncio.run(_cleanup_client())
+    elif sys.argv[1:]:
+        raise SystemExit("usage: python -m haste.seed [--cleanup-client]")
+    else:
+        asyncio.run(_main())

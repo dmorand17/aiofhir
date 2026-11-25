@@ -156,7 +156,7 @@ def load_tokens(path: Path) -> TokenSet:
     return TokenSet.from_dict(json.loads(path.read_text()))
 
 
-async def login_access_token(
+async def login_tokens(
     base: str,
     client_id: str,
     client_secret: str | None,
@@ -164,8 +164,8 @@ async def login_access_token(
     scope: str,
     open_browser: Browser | None = None,
     port: int = 8765,
-) -> str:
-    """Sign in with an existing client and return the access token."""
+) -> TokenSet:
+    """Sign in with an existing client and return the exchanged tokens."""
     logger.info("signing in with client %s", client_id)
     logger.debug("login scope %s", scope)
     smart = SmartClient(
@@ -184,7 +184,22 @@ async def login_access_token(
         if inspect.isawaitable(opened):
             await opened
         code = await wait_for_code(future)
-    tokens = await smart.exchange_code(code, request.code_verifier)
+    return await smart.exchange_code(code, request.code_verifier)
+
+
+async def login_access_token(
+    base: str,
+    client_id: str,
+    client_secret: str | None,
+    *,
+    scope: str,
+    open_browser: Browser | None = None,
+    port: int = 8765,
+) -> str:
+    """Sign in with an existing client and return the access token."""
+    tokens = await login_tokens(
+        base, client_id, client_secret, scope=scope, open_browser=open_browser, port=port
+    )
     return tokens.access_token
 
 

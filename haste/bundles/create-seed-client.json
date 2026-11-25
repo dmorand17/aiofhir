@@ -7,7 +7,7 @@
         "resourceType": "ClientApplication",
         "id": "aiofhir-seed",
         "name": "aiofhir seed",
-        "description": "Public client used to sign in before the smoke client exists.",
+        "description": "Admin client for haste.seed. Public only until the first seed run, which gives it a secret.",
         "grantType": [
           "authorization_code",
           "refresh_token"

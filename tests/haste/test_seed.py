@@ -23,7 +23,6 @@ from haste.seeding import (
     build_client_application,
     build_membership,
     build_patient,
-    build_read_policy,
     count_resources,
     haste_system_base,
 )
@@ -322,19 +321,6 @@ def test_system_base_is_the_tenant_system_project() -> None:
         haste_system_base("http://h.example/fhir")
 
 
-def test_read_policy_only_permits_read_requests() -> None:
-    policy = build_read_policy()
-    expression = policy["rule"][0]["condition"]["expression"]["expression"]
-    assert policy["engine"] == "rule-engine"
-    assert "'read'" in expression and "'search'" in expression
-    for write in ("create", "update", "patch", "delete", "transaction", "batch"):
-        assert f"'{write}'" not in expression
-    # Haste's rule engine rejects a condition on a rule with combineBehavior "any" or
-    # "allOf", and reports it only as "No policy has granted access to your request."
-    assert "combineBehavior" not in policy["rule"][0]
-    assert "rule" not in policy["rule"][0]
-
-
 HASTE = "https://api.haste.health/w/acme/demo/api/v1/fhir"
 SYSTEM = "https://api.haste.health/w/acme/system/api/v1/fhir"
 
@@ -407,7 +393,8 @@ async def test_seed_invites_the_patient_user_in_the_system_project() -> None:
     assignment = json.loads(routes["assignment"].calls.last.request.content)
     assert assignment["link"]["reference"] == "Membership/mem-new"
     assert assignment["accessPolicy"]["reference"] == f"AccessPolicyV2/{READ_POLICY_ID}"
-    assert routes["policy"].called
+    policy = json.loads(routes["policy"].calls.last.request.content)
+    assert "'Patient/pt-1' in %target.subject.reference" in json.dumps(policy)
     assert result.membership_linked and result.policy_assigned
 
 

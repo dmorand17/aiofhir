@@ -9,3 +9,4 @@ dist/
 .DS_Store
 .env
 haste/.tokens.json
+haste/.user-tokens.json

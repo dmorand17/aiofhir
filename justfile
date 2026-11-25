@@ -46,6 +46,18 @@ discover:
 seed:
     SYNTHEA_DIR="{{ env_var_or_default('SYNTHEA_DIR', 'haste/synthea-data') }}" uv run python -m haste.seed
 
+# Delete the admin seed client (aiofhir-seed). Post haste/bundles/create-seed-client.json to seed again.
+seed-cleanup:
+    uv run python -m haste.seed --cleanup-client
+
+# Check the patient access policy with $evaluate-policy and that aiofhir-seed needs its secret.
+check-policy:
+    uv run python -m haste.check_policy
+
+# check-policy, then sign in as the patient user with user/*.rs and send the read cases for real.
+check-policy-as-patient:
+    uv run python -m haste.check_policy --as-patient
+
 # Sign in with the browser and print the record helpers.
 smoke:
     uv run python -m haste.smoke

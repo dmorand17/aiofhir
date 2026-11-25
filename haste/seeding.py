@@ -31,10 +31,26 @@ SEED_PATIENT = "seed-patient"
 CLIENT_ID = "aiofhir-smoke"
 REDIRECT_URI = "http://localhost:8765/callback"
 READ_POLICY_ID = "aiofhir-seed-patient-read"
+# The public admin client from bundles/create-seed-client.json. The seed makes
+# it confidential once it has signed in (see secure_seed_client).
+SEED_CLIENT_ID = "aiofhir-seed"
 Json = dict[str, Any]
 Sleep = Callable[[float], Awaitable[None]]
 _HASTE_BASE = re.compile(r"^(https?://[^/]+/w/[^/]+)/[^/]+(/api/v1/fhir)/?$")
-_READ_TYPES = ("read", "vread", "search", "history", "compartment", "capabilities")
+# FHIR R4 id syntax. The patient id is written into FHIRPath string literals,
+# so anything else is refused rather than escaped.
+_FHIR_ID = re.compile(r"^[A-Za-z0-9\-.]{1,64}$")
+# Patient-compartment types the record helpers read, by the element that
+# names the patient. Only these may be read or searched, and only for the seed
+# patient.
+COMPARTMENT_TYPES: dict[str, tuple[str, ...]] = {
+    "subject": ("Observation", "Condition", "MedicationRequest"),
+    "patient": ("AllergyIntolerance",),
+    "participant.actor": ("Appointment",),
+}
+# Reference data outside any patient compartment that the helpers read by id
+# (a MedicationRequest's medicationReference). Read only, never searched.
+SHARED_READ_TYPES = ("Medication",)
 
 
 class SeedUserError(RuntimeError):
@@ -72,21 +88,137 @@ def build_user(email: str) -> Json:
     return {"resourceType": "User", "email": email, "role": "member"}
 
 
-def build_read_policy() -> Json:
-    """Read and search only. Patient scopes bind the token to one compartment."""
-    condition = " or ".join(f"%request.type = '{kind}'" for kind in _READ_TYPES)
+def _fhirpath(expression: str) -> Json:
+    return {"language": "text/fhirpath", "expression": expression}
+
+
+def _one_of(values: tuple[str, ...]) -> str:
+    return "(" + " | ".join(f"'{value}'" for value in values) + ")"
+
+
+def build_read_policy(patient_id: str) -> Json:
+    """Read and search the one seed patient's record, and nothing else.
+
+    Haste evaluates the policy for every request a member makes, whatever the
+    SMART scope of the token (``patient/`` or ``user/``), so the patient is
+    pinned here rather than trusted to the scope. Rules, all under one
+    ``any`` rule (Haste denies the whole policy as soon as a top-level rule
+    denies):
+
+    * ``capabilities``: the CapabilityStatement.
+    * ``read-patient``: ``GET Patient/{id}`` for the seed patient only.
+    * ``read-by-<element>``: ``GET <Type>/{id}`` of a compartment type, when the
+      stored resource's ``<element>.reference`` is ``Patient/{id}``.
+    * ``read-shared``: ``GET Medication/{id}``.
+    * ``search-patient``: ``GET Patient?_id={id}``.
+    * ``search-compartment``: ``GET <Type>?patient={id}`` of a compartment
+      type, with a single unmodified, unchained ``patient`` value and no
+      ``_has``.
+
+    Everything else falls through and is denied: other patients, searches
+    without the patient, system-level search and history, ``_history``,
+    compartment URLs, operations, batch/transaction and every write.
+
+    Each rule's ``target`` only uses ``%request.type`` and ``%request.level``,
+    which every request has, so a rule only evaluates fields its request
+    shape carries. An evaluation error denies the request.
+    """
+    if not _FHIR_ID.match(patient_id):
+        raise ValueError("patient id is not a FHIR id")
+    own = f"Patient/{patient_id}"
+    compartment = tuple(kind for kinds in COMPARTMENT_TYPES.values() for kind in kinds)
+    is_read = "%request.type = 'read'"
+    patient_param = "%request.parameters.patient"
+    rules: list[Json] = [
+        {
+            "name": "capabilities",
+            "condition": {"expression": _fhirpath("%request.type = 'capabilities'")},
+        },
+        {
+            "name": "read-patient",
+            "target": {"expression": _fhirpath(is_read)},
+            "condition": {
+                "expression": _fhirpath(
+                    f"%request.resource_type = 'Patient' and %request.id = '{patient_id}'"
+                )
+            },
+        },
+    ]
+    for element, kinds in COMPARTMENT_TYPES.items():
+        rules.append(
+            {
+                "name": f"read-by-{element.replace('.', '-')}",
+                "target": {
+                    "expression": _fhirpath(
+                        f"{is_read} and %request.resource_type in {_one_of(kinds)}"
+                    )
+                },
+                "condition": {"expression": _fhirpath(f"'{own}' in %target.{element}.reference")},
+            }
+        )
+    rules += [
+        {
+            "name": "read-shared",
+            "target": {"expression": _fhirpath(is_read)},
+            "condition": {
+                "expression": _fhirpath(f"%request.resource_type in {_one_of(SHARED_READ_TYPES)}")
+            },
+        },
+        {
+            "name": "search-patient",
+            "target": {
+                "expression": _fhirpath(
+                    "%request.type = 'search' and %request.level = 'type'"
+                    " and %request.resource_type = 'Patient'"
+                )
+            },
+            "condition": {
+                "expression": _fhirpath(
+                    "%request.parameters._id.exists()"
+                    f" and %request.parameters._id.value.all($this = '{patient_id}')"
+                    " and %request.parameters._id.modifier.empty()"
+                    " and %request.parameters._has.empty()"
+                )
+            },
+        },
+        {
+            "name": "search-compartment",
+            "target": {
+                "expression": _fhirpath(
+                    "%request.type = 'search' and %request.level = 'type'"
+                    f" and %request.resource_type in {_one_of(compartment)}"
+                )
+            },
+            "condition": {
+                "expression": _fhirpath(
+                    f"{patient_param}.exists()"
+                    f" and {patient_param}.value.all($this = '{patient_id}' or $this = '{own}')"
+                    f" and {patient_param}.modifier.empty()"
+                    f" and {patient_param}.chains.empty()"
+                    " and %request.parameters._has.empty()"
+                )
+            },
+        },
+    ]
     return {
         "resourceType": "AccessPolicyV2",
         "id": READ_POLICY_ID,
         "name": "aiofhir seed patient read-only",
-        "description": "Read-only access for the aiofhir smoke patient.",
+        "description": (
+            f"Read-only access to {own}'s own record: that Patient, its compartment"
+            " resources and referenced Medications. Nothing else."
+        ),
         "engine": "rule-engine",
-        "rule": [
+        "attribute": [
             {
-                "name": "read-only",
-                "condition": {"expression": {"language": "text/fhirpath", "expression": condition}},
+                "attributeId": "target",
+                "operation": {
+                    "type": "read",
+                    "path": _fhirpath("%request.resource_type + '/' + %request.id"),
+                },
             }
         ],
+        "rule": [{"name": "seed-patient-only", "combineBehavior": "any", "rule": rules}],
     }
 
 
@@ -293,7 +425,12 @@ async def apply_seed(
     linked = False
     assigned = False
     if user_id is not None:
-        await _put(http, f"{root}/AccessPolicyV2/{READ_POLICY_ID}", token, build_read_policy())
+        await _put(
+            http,
+            f"{root}/AccessPolicyV2/{READ_POLICY_ID}",
+            token,
+            build_read_policy(used_patient),
+        )
         membership_id = await _ensure_membership(http, root, token, user_id, used_patient)
         linked = True
         assigned = await _ensure_assignment(http, root, token, membership_id)
@@ -533,6 +670,76 @@ def _membership_patient(resource: Json) -> str | None:
     if not isinstance(reference, str) or not reference.startswith("Patient/"):
         return None
     return reference.removeprefix("Patient/")
+
+
+async def secure_seed_client(
+    http: httpx.AsyncClient,
+    base: str,
+    token: str,
+    *,
+    new_secret: str,
+    on_secret: Callable[[str], None],
+    client_id: str = SEED_CLIENT_ID,
+) -> str:
+    """Make the admin seed client confidential so no one else can sign in with it.
+
+    ``bundles/create-seed-client.json`` registers ``aiofhir-seed`` as a public
+    client allowed ``user/*.cruds``. Any project member, including the patient
+    user, could sign in with it and get a user-level token. Haste refuses a
+    token exchange whose ``client_secret`` does not match the stored one
+    (a missing secret only matches a missing secret), so giving the client a
+    secret closes that door, for new codes and for refresh tokens alike.
+
+    The secret goes to ``on_secret`` before the client is written, so it is
+    never lost. The refresh grant is dropped: the seed signs in fresh each run.
+    Returns ``"absent"``, ``"confidential"`` (already has a secret, unchanged)
+    or ``"locked"``.
+    """
+    url = f"{base.rstrip('/')}/ClientApplication/{client_id}"
+    response = await http.get(url, headers=_headers(token))
+    if response.status_code == 404:
+        return "absent"
+    if response.status_code >= 400:
+        raise RuntimeError(f"seed client lookup failed ({response.status_code})")
+    current = response.json()
+    if not isinstance(current, dict):
+        raise RuntimeError("seed client lookup did not return a ClientApplication")
+    if str(current.get("secret") or "").strip():
+        return "confidential"
+    on_secret(new_secret)
+    locked = {
+        key: value
+        for key, value in current.items()
+        if key not in ("meta", "secret", "jwks", "jwksUri")
+    }
+    locked["id"] = client_id
+    locked["grantType"] = ["authorization_code"]
+    locked["secret"] = new_secret
+    written = await http.put(url, json=locked, headers=_headers(token))
+    if written.status_code >= 400:
+        raise RuntimeError(
+            f"seed client lock failed ({written.status_code}); the new secret is in .env "
+            "as CLIENT_SECRET but the client may still be public"
+        )
+    return "locked"
+
+
+async def delete_seed_client(
+    http: httpx.AsyncClient,
+    base: str,
+    token: str,
+    *,
+    client_id: str = SEED_CLIENT_ID,
+) -> bool:
+    """Delete the admin seed client. Returns False when it was already gone."""
+    response = await http.delete(
+        f"{base.rstrip('/')}/ClientApplication/{client_id}", headers=_headers(token)
+    )
+    if response.status_code == 404:
+        return False
+    if response.status_code >= 400:
+        raise RuntimeError(f"seed client delete failed ({response.status_code})")
+    return True
 
 
 async def _ensure_client(
