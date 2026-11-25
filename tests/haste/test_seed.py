@@ -117,7 +117,10 @@ async def test_apply_seed_reuses_the_seed_patient() -> None:
         respx.get(f"{BASE}/ClientApplication/{CLIENT_ID}").respond(
             200, json={"resourceType": "ClientApplication", "id": CLIENT_ID}
         )
-        respx.get(f"{BASE}/Appointment").respond(200, json={"resourceType": "Bundle", "total": 1})
+        respx.get(f"{BASE}/Appointment").respond(
+            200, json={"resourceType": "Bundle", "entry": [{"resource": {"id": "appt-1"}}]}
+        )
+        respx.put(url__regex=rf"{BASE}/Appointment/.+").respond(200, json={})
         async with httpx.AsyncClient() as http:
             result = await apply_seed(
                 http,
@@ -205,6 +208,7 @@ async def test_apply_seed_reloads_information_and_skips_existing_appointments() 
             json={"resourceType": "Bundle", "total": 1, "entry": [{"resource": {"id": "kept"}}]},
         )
         created = respx.post(f"{BASE}/Appointment").respond(201, json={})
+        respx.put(url__regex=rf"{BASE}/Appointment/.+").respond(200, json={})
         async with httpx.AsyncClient() as http:
             result = await apply_seed(
                 http,
@@ -240,7 +244,10 @@ async def test_apply_seed_reloads_a_partial_information_index() -> None:
         respx.get(f"{BASE}/ClientApplication/{CLIENT_ID}").respond(
             200, json={"resourceType": "ClientApplication", "id": CLIENT_ID}
         )
-        respx.get(f"{BASE}/Appointment").respond(200, json={"resourceType": "Bundle", "total": 1})
+        respx.get(f"{BASE}/Appointment").respond(
+            200, json={"resourceType": "Bundle", "entry": [{"resource": {"id": "appt-1"}}]}
+        )
+        respx.put(url__regex=rf"{BASE}/Appointment/.+").respond(200, json={})
         async with httpx.AsyncClient() as http:
             result = await apply_seed(
                 http,
@@ -275,7 +282,10 @@ async def test_apply_seed_loads_empty_information_and_creates_the_client() -> No
         created = respx.put(f"{BASE}/ClientApplication/{CLIENT_ID}").respond(
             201, json={"resourceType": "ClientApplication", "id": CLIENT_ID}
         )
-        respx.get(f"{BASE}/Appointment").respond(200, json={"resourceType": "Bundle", "total": 1})
+        respx.get(f"{BASE}/Appointment").respond(
+            200, json={"resourceType": "Bundle", "entry": [{"resource": {"id": "appt-1"}}]}
+        )
+        respx.put(url__regex=rf"{BASE}/Appointment/.+").respond(200, json={})
         async with httpx.AsyncClient() as http:
             result = await apply_seed(
                 http,
@@ -319,6 +329,10 @@ def test_read_policy_only_permits_read_requests() -> None:
     assert "'read'" in expression and "'search'" in expression
     for write in ("create", "update", "patch", "delete", "transaction", "batch"):
         assert f"'{write}'" not in expression
+    # Haste's rule engine rejects a condition on a rule with combineBehavior "any" or
+    # "allOf", and reports it only as "No policy has granted access to your request."
+    assert "combineBehavior" not in policy["rule"][0]
+    assert "rule" not in policy["rule"][0]
 
 
 HASTE = "https://api.haste.health/w/acme/demo/api/v1/fhir"
@@ -330,7 +344,12 @@ def _mock_project(mock: respx.MockRouter, membership: list[dict[str, object]]) -
     mock.get(f"{HASTE}/ClientApplication/{CLIENT_ID}").respond(
         200, json={"resourceType": "ClientApplication", "id": CLIENT_ID}
     )
-    mock.get(f"{HASTE}/Appointment").respond(200, json={"resourceType": "Bundle", "total": 1})
+    mock.get(f"{HASTE}/Appointment").respond(
+        200, json={"resourceType": "Bundle", "entry": [{"resource": {"id": "appt-9"}}]}
+    )
+    routes["appointment_update"] = mock.put(url__regex=rf"{HASTE}/Appointment/.+").respond(
+        200, json={}
+    )
     routes["chart"] = mock.post(HASTE).respond(200, json={"resourceType": "Bundle"})
     routes["policy"] = mock.put(f"{HASTE}/AccessPolicyV2/{READ_POLICY_ID}").respond(
         200, json={"resourceType": "AccessPolicyV2", "id": READ_POLICY_ID}
@@ -396,7 +415,11 @@ async def test_seed_reuses_an_existing_user_and_uses_the_system_token() -> None:
     with respx.mock as mock:
         _mock_project(mock, [])
         lookup = mock.get(f"{SYSTEM}/User").respond(
-            200, json={"resourceType": "Bundle", "entry": [{"resource": {"id": "user-1"}}]}
+            200,
+            json={
+                "resourceType": "Bundle",
+                "entry": [{"resource": {"id": "user-1", "email": "p@example.com"}}],
+            },
         )
         invite = mock.post(f"{SYSTEM}/User").respond(201, json={})
         result = await _seed(seed_user_email="p@example.com", system_token="system-token")
@@ -468,3 +491,79 @@ async def test_index_polling_backs_off_between_attempts() -> None:
         )
         await _seed(practitioner_bundle=practitioners, sleep=sleep)
     assert slept == [0.5, 1.0]
+
+
+async def test_reseed_moves_existing_appointments_to_fresh_dates() -> None:
+    with respx.mock as mock:
+        routes = _mock_project(mock, [])
+        update = routes["appointment_update"]
+        create = mock.post(f"{HASTE}/Appointment").respond(201, json={})
+        result = await _seed()
+    assert result.appointments_created == 0
+    assert not create.called
+    starts = {json.loads(call.request.content)["start"] for call in update.calls}
+    assert starts == {a["start"] for a in build_appointments("pt-1", WHEN)}
+    assert all(json.loads(call.request.content)["id"] == "appt-9" for call in update.calls)
+
+
+async def test_a_failed_batch_entry_stops_the_seed() -> None:
+    with respx.mock as mock:
+        _mock_project(mock, [])
+        mock.post(HASTE).respond(
+            200,
+            json={
+                "resourceType": "Bundle",
+                "type": "batch-response",
+                "entry": [
+                    {"response": {"status": "201 Created"}},
+                    {"response": {"status": "400 Bad Request"}},
+                ],
+            },
+        )
+        with pytest.raises(RuntimeError, match="1 of 2 batch entries failed"):
+            await _seed()
+
+
+async def test_a_new_client_secret_is_handed_out_before_later_steps_fail() -> None:
+    saved: list[str] = []
+    with respx.mock as mock:
+        _mock_project(mock, [])
+        mock.get(f"{HASTE}/ClientApplication/{CLIENT_ID}").respond(404)
+        mock.put(f"{HASTE}/ClientApplication/{CLIENT_ID}").respond(201, json={})
+        mock.get(f"{SYSTEM}/User").respond(403)
+        with pytest.raises(SeedUserError):
+            await _seed(seed_user_email="p@example.com", on_client_secret=saved.append)
+    assert saved == ["generated-secret"]
+
+
+async def test_seed_refuses_to_relink_a_membership_that_is_not_a_patient() -> None:
+    existing: dict[str, object] = {
+        "resourceType": "Membership",
+        "id": "mem-admin",
+        "user": {"reference": "User/user-5"},
+        "link": {"reference": "Practitioner/pr-1"},
+    }
+    with respx.mock as mock:
+        routes = _mock_project(mock, [existing])
+        with pytest.raises(RuntimeError, match="Practitioner"):
+            await _seed(seed_user_id="user-5")
+    assert not routes["membership_update"].called
+    assert not routes["membership_create"].called
+
+
+async def test_seed_invites_when_the_user_search_returns_someone_else() -> None:
+    with respx.mock as mock:
+        _mock_project(mock, [])
+        mock.get(f"{SYSTEM}/User").respond(
+            200,
+            json={
+                "resourceType": "Bundle",
+                "entry": [{"resource": {"id": "admin", "email": "admin@example.com"}}],
+            },
+        )
+        invite = mock.post(f"{SYSTEM}/User").respond(
+            201, json={"resourceType": "User", "id": "user-9"}
+        )
+        result = await _seed(seed_user_email="P@example.com")
+    assert invite.called
+    assert result.user_id == "user-9"

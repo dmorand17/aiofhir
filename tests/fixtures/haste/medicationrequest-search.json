@@ -1,0 +1,107 @@
+{
+  "entry": [
+    {
+      "resource": {
+        "contained": [
+          {
+            "code": {
+              "text": "Aspirin"
+            },
+            "id": "med1",
+            "resourceType": "Medication"
+          }
+        ],
+        "id": "mr-contained",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "mr-contained"
+          }
+        ],
+        "intent": "order",
+        "medicationReference": {
+          "reference": "#med1"
+        },
+        "resourceType": "MedicationRequest",
+        "status": "active",
+        "subject": {
+          "reference": "Patient/example-patient"
+        }
+      },
+      "search": {
+        "mode": "match"
+      }
+    },
+    {
+      "resource": {
+        "id": "mr-inline",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "mr-inline"
+          }
+        ],
+        "intent": "order",
+        "medicationCodeableConcept": {
+          "text": "Lisinopril"
+        },
+        "resourceType": "MedicationRequest",
+        "status": "active",
+        "subject": {
+          "reference": "Patient/example-patient"
+        }
+      },
+      "search": {
+        "mode": "match"
+      }
+    },
+    {
+      "resource": {
+        "id": "mr-remote",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "mr-remote"
+          }
+        ],
+        "intent": "order",
+        "medicationReference": {
+          "reference": "Medication/med-remote"
+        },
+        "resourceType": "MedicationRequest",
+        "status": "active",
+        "subject": {
+          "reference": "Patient/example-patient"
+        }
+      },
+      "search": {
+        "mode": "match"
+      }
+    },
+    {
+      "resource": {
+        "id": "mr-stopped",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "mr-stopped"
+          }
+        ],
+        "intent": "order",
+        "medicationCodeableConcept": {
+          "text": "Stopped drug"
+        },
+        "resourceType": "MedicationRequest",
+        "status": "stopped",
+        "subject": {
+          "reference": "Patient/example-patient"
+        }
+      },
+      "search": {
+        "mode": "match"
+      }
+    }
+  ],
+  "resourceType": "Bundle",
+  "type": "searchset"
+}

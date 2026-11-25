@@ -1,0 +1,42 @@
+{
+  "entry": [
+    {
+      "resource": {
+        "category": [
+          {
+            "coding": [
+              {
+                "code": "laboratory"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "text": "A1c"
+        },
+        "effectiveDateTime": "2026-11-05T20:36:23+00:00",
+        "id": "lab-a1c",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "lab-a1c"
+          }
+        ],
+        "resourceType": "Observation",
+        "status": "final",
+        "subject": {
+          "reference": "Patient/example-patient"
+        },
+        "valueQuantity": {
+          "unit": "%",
+          "value": 6.1
+        }
+      },
+      "search": {
+        "mode": "match"
+      }
+    }
+  ],
+  "resourceType": "Bundle",
+  "type": "searchset"
+}

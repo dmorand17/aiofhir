@@ -15,8 +15,11 @@ def test_scrub_removes_token_fields_and_bearer_values() -> None:
     assert "Bearer [redacted]" in cleaned
 
 
-def test_recorded_fixture_has_no_token_material() -> None:
-    text = FIXTURE.read_text()
-    assert scrub(text) == text
-    assert "access_token" not in text
-    assert "Bearer " not in text
+def test_recorded_fixtures_have_no_token_material() -> None:
+    files = sorted(FIXTURE.parent.glob("*.json"))
+    assert len(files) > 1
+    for path in files:
+        text = path.read_text()
+        assert scrub(text) == text, path.name
+        assert "access_token" not in text, path.name
+        assert "Bearer " not in text, path.name

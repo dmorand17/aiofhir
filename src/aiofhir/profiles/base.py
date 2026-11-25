@@ -28,6 +28,15 @@ class ServerProfile:
         del resource
         return {key: list(values) for key, values in params.items()}
 
+    def next_page(
+        self,
+        params: Mapping[str, Sequence[str]],
+        received: int,
+    ) -> dict[str, list[str]] | None:
+        """Search params for the page after one that had no `next` link, or None to stop."""
+        del params, received
+        return None
+
     async def resolve_medication(self, request: Mapping[str, Any], read: ReadResource) -> str:
         concept = request.get("medicationCodeableConcept")
         if isinstance(concept, dict):

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import logging
+import os
 import webbrowser
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -15,7 +17,7 @@ from aiofhir.display import format_summary
 from aiofhir.errors import TokenError
 from aiofhir.profiles import HasteProfile
 from aiofhir.scrub import scrub
-from aiofhir.smart import RefreshingToken, SmartClient, verify_state
+from aiofhir.smart import RefreshingToken, SmartClient, TokenSet, verify_state
 from aiofhir.smart.client import AuthorizationRequest
 
 REDIRECT_URI = "http://localhost:8765/callback"
@@ -34,8 +36,9 @@ _HELPERS = (
 
 CALLBACK_TIMEOUT = 300.0
 _NO_PATIENT = (
-    "Sign in as the seeded patient user (SEED_USER_EMAIL), whose Membership links to the "
-    "seed Patient, not as the admin. Use a private window so the admin session is not reused."
+    "Sign in as the seeded patient user (SEED_USER_EMAIL or SEED_USER_ID), whose Membership "
+    "links to the seed Patient, not as the admin. That user needs the `member` role: Haste "
+    "drops patient scopes for an `owner`. Use a private window so the admin session is not reused."
 )
 
 
@@ -83,8 +86,12 @@ async def run_smoke(
     client_secret: str | None,
     code: str,
     verifier: str,
+    on_tokens: Callable[[TokenSet], Awaitable[None]] | None = None,
 ) -> str:
-    """Exchange a code, print every helper, and force one refresh."""
+    """Exchange a code, print every helper, and force one refresh.
+
+    ``on_tokens`` receives the exchanged tokens and each rotated set after a refresh.
+    """
     smart = SmartClient(
         base,
         client_id=client_id,
@@ -98,7 +105,9 @@ async def run_smoke(
         raise SignInError(f"{exc}. {_NO_PATIENT}") from exc
     if not tokens.patient:
         raise SignInError(f"Token response did not include a patient. {_NO_PATIENT}")
-    holder = RefreshingToken(smart, tokens)
+    if on_tokens is not None:
+        await on_tokens(tokens)
+    holder = RefreshingToken(smart, tokens, on_refresh=on_tokens)
     async with FhirClient(base, holder, profile=HasteProfile()) as fhir:
         record = PatientRecord(fhir, patient_id=tokens.patient)
         sections = [f"patient: {tokens.patient}"]
@@ -129,8 +138,22 @@ def save_env_value(path: Path, name: str, value: str) -> None:
     rewritten = [prefix + value if line.startswith(prefix) else line for line in lines]
     if not any(line.startswith(prefix) for line in lines):
         rewritten.append(prefix + value)
-    path.write_text("\n".join(rewritten) + "\n")
-    path.chmod(0o600)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        handle.write("\n".join(rewritten) + "\n")
+
+
+def save_tokens(path: Path, tokens: TokenSet) -> None:
+    """Write a TokenSet for the live tests. The file is owner-only and never logged."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        json.dump(tokens.to_dict(), handle)
+
+
+def load_tokens(path: Path) -> TokenSet:
+    return TokenSet.from_dict(json.loads(path.read_text()))
 
 
 async def login_access_token(
@@ -188,9 +211,17 @@ async def _read_callback(
 ) -> None:
     status = b"400 Bad Request"
     body = b"Sign-in failed."
+    raw = await reader.read(8192)
+    parts = raw.decode("latin1").split(" ", 2)
+    path = parts[1] if len(parts) > 1 else ""
+    if urlsplit(path).path != "/callback":
+        # Preconnects, favicon requests and empty sockets are not the redirect.
+        if raw:
+            await _respond(writer, b"404 Not Found", b"Not found.")
+        else:
+            writer.close()
+        return
     try:
-        raw = await reader.read(8192)
-        path = raw.decode("latin1").split(" ", 2)[1]
         query = parse_qs(urlsplit(path).query)
         verify_state(expected=expected_state, received=query.get("state", [""])[0])
         error = query.get("error", [""])[0]
@@ -208,6 +239,10 @@ async def _read_callback(
     except Exception as exc:
         if not future.done():
             future.set_exception(exc)
+    await _respond(writer, status, body)
+
+
+async def _respond(writer: asyncio.StreamWriter, status: bytes, body: bytes) -> None:
     writer.write(
         b"HTTP/1.1 "
         + status

@@ -11,7 +11,7 @@ with `just seed` and `just smoke`, or `uv run python -m haste.seed` and
 | `smoke.py`, `login.py` | Browser sign-in, every record helper, one forced refresh |
 | `bundles/` | Hand-posted transactions: the admin seed client, and a seed cleanup |
 | `synthea-data/` | Practitioner and hospital bundles the seed loads (`SYNTHEA_DIR`) |
-| `.env.example` | Variables the scripts read. Copy them into the repo-root `.env`. |
+| `.env.example` | Variables the scripts read from the repo-root `.env` or `haste/.env`. The seed writes new values to the root `.env`. |
 
 Unit tests are in `tests/haste/`. The opt-in live check is `tests/live/test_haste.py`.
 
@@ -53,6 +53,12 @@ to the seed patient).
 SEED_USER_EMAIL=you+patient@example.com just seed
 ```
 
+On the hosted tenant the admin token cannot read or write the `system` project
+(401). Invite the user in the Haste admin console with the **`member`** role,
+accept the email, and set `SEED_USER_ID` to that User's id. Haste issues
+`patient/*` scopes and the `patient` launch context only to `member` users. For
+an `owner` it silently drops them, and the token comes back without a patient.
+
 ## Smoke test
 
 `haste/smoke.py` (`just smoke`) signs in with the `aiofhir-smoke` client the seed
@@ -64,3 +70,23 @@ URL instead of opening it.
 ```bash
 just smoke
 ```
+
+## Live tests
+
+`tests/live/test_haste.py` needs a token that is bound to the seeded patient.
+`SAVE_TOKENS=1 just smoke` writes that `TokenSet` to `haste/.tokens.json`. The
+file is gitignored and mode 600, and it is rewritten after each refresh so the
+rotated refresh token is kept. Then run:
+
+```bash
+AIOFHIR_LIVE=1 just test tests/live
+```
+
+The live tests check that:
+
+- the token response names a patient;
+- every helper item is cited and belongs to that patient;
+- the seeded cancelled appointment is filtered out;
+- paging with `_count=1` follows `next` links and stops.
+
+Delete `haste/.tokens.json` when you are done.
