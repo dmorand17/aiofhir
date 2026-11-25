@@ -3,7 +3,7 @@
 `aiofhir` is a thin **async FHIR R4 and SMART on FHIR client** for Python, built on httpx. It handles patient sign-in (`aiofhir.smart`), reading and searching, and patient-scoped helpers that return compact, cited summaries. It has **no LiveKit dependency**. LiveKit tools live in each demo repo.
 
 - **Why async httpx:** LiveKit agents run on asyncio, so a blocking client would stall the event loop during FHIR calls and token refreshes. httpx gives pooling, timeouts, HTTP/2 and a mockable transport (respx).
-- **Status:** pre-release. Phases 0–2 are complete on `cursor/phase-2-profiles`. The PyPI name is reserved as 0.0.0. Nothing has run against a live server. Check a phase item only when its code and tests pass.
+- **Status:** pre-release. Phases 0–2 are complete. Phase 3 is in progress on `cursor/phase-3-haste`: the seed and smoke scripts run against a fake server, and the live Haste checks stay opt-in. The PyPI name is reserved as 0.0.0. Check a phase item only when its code and tests pass.
 
 ## Principles
 - **Patient scoping.**
@@ -46,8 +46,8 @@ src/aiofhir/  __init__.py errors.py client.py record.py summary.py display.py re
               smart/ (discovery.py pkce.py scopes.py client.py tokens.py)
               profiles/ (base.py generic.py haste.py epic.py cerner.py)
               server/ (optional extra [server]: reference backend for RemoteRecord)
-tests/        fake_fhir.py (respx)  fixtures/{haste,epic,cerner}/  test_*.py  live/ (opt-in)
-scripts/seed_haste.py   examples/smoke_haste.py
+tests/        fake_fhir.py (respx)  fixtures/{haste,epic,cerner}/  test_*.py  haste/  live/ (opt-in)
+haste/        seed.py seeding.py smoke.py login.py bundles/ synthea-data/  (dev tooling, not packaged)
 ```
 Extras: `[server]` (fastapi, cryptography) and, later, `[jwt]`. There is **no `[livekit]` extra**.
 
@@ -111,14 +111,14 @@ These are the SMART configuration fields, not the FHIR `/metadata` CapabilitySta
 - *Tests:* each profile's `adapt_search`, for example Cerner adds an `lt` bound and Epic drops `_sort`.
 
 **Phase 3: Live against Haste (1.5 d).** Run local Haste with docker-compose: API on :3000, admin on :3001, tenant `my-health`, admin `myuser@health.org` / `testing_password`. Create the project `lk-demo`.
-- [ ] **`scripts/seed_haste.py`** is idempotent and creates:
+- [ ] **`haste/seed.py`** is idempotent and creates:
   - a Patient with Practitioners and Locations;
   - Appointments at past, +3/+14/+45 days, one pending and one cancelled;
   - active and stopped MedicationRequests, covering inline codes, references and contained Medications;
   - an AllergyIntolerance, Conditions and lab Observations;
   - a User with a `Membership` linked to the Patient, plus a **read-only, own-patient AccessPolicyV2**;
   - a `ClientApplication` with redirect `http://localhost:8765/callback`, grants `authorization_code` and `refresh_token`, and an allowed scope copied from that server's `scopes_supported` (so the derived request is a subset of what the app may ask for).
-- [ ] **`examples/smoke_haste.py`:** browser login with no `scope=` argument, state check, code exchange, every helper printed, one forced refresh. The requested scope is the one `scopes_from_capabilities` built.
+- [ ] **`haste/smoke.py`:** browser login with no `scope=` argument, state check, code exchange, every helper printed, one forced refresh. The requested scope is the one `scopes_from_capabilities` built.
 - [ ] **`tests/live`:** opt-in through environment credentials. It checks that the token has a `patient`, that every resource returned belongs to that patient, and that paging terminates.
 - [ ] **Recorded, de-identified fixtures** go into the unit tests, with a scrubber check.
 - *Done when:* the live tests pass, the cancelled appointment is filtered out, every item has a citation, and no token appears in any output.

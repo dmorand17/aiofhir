@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 
 from aiofhir.profiles.base import ServerProfile
+
+logger = logging.getLogger(__name__)
 
 
 class EpicProfile(ServerProfile):
@@ -16,5 +19,7 @@ class EpicProfile(ServerProfile):
         params: Mapping[str, Sequence[str]],
     ) -> dict[str, list[str]]:
         adapted = super().adapt_search(resource, params)
-        adapted.pop("_sort", None)
+        if "_sort" in adapted:
+            logger.debug("dropping _sort for %s", resource)
+            adapted.pop("_sort")
         return adapted

@@ -37,3 +37,15 @@ fix:
 
 # Run the same checks as CI: sync, lint, format, mypy, pytest.
 check: sync lint fmt-check typecheck test
+
+# Discover SMART endpoints and the derived scope for BASE.
+discover:
+    uv run python examples/discover.py
+
+# Seed Haste. SYNTHEA_DIR defaults to haste/synthea-data. LOG_LEVEL=DEBUG traces requests.
+seed:
+    SYNTHEA_DIR="{{ env_var_or_default('SYNTHEA_DIR', 'haste/synthea-data') }}" uv run python -m haste.seed
+
+# Sign in with the browser and print the record helpers.
+smoke:
+    uv run python -m haste.smoke

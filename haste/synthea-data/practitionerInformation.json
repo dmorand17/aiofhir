@@ -1,0 +1,110 @@
+{
+  "resourceType": "Bundle",
+  "type": "batch",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Practitioner",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "pract-seed-primary"
+          }
+        ],
+        "active": true,
+        "name": [
+          {
+            "family": "Seed",
+            "given": ["Primary"],
+            "prefix": ["Dr"]
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "Practitioner",
+        "ifNoneExist": "identifier=https://aiofhir.dev/seed|pract-seed-primary"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "PractitionerRole",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "role-seed-primary"
+          }
+        ],
+        "active": true,
+        "practitioner": {
+          "reference": "Practitioner?identifier=https://aiofhir.dev/seed|pract-seed-primary"
+        },
+        "organization": {
+          "reference": "Organization?identifier=https://aiofhir.dev/seed|org-seed-hospital"
+        },
+        "location": [
+          {
+            "reference": "Location?identifier=https://aiofhir.dev/seed|loc-seed-clinic"
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "PractitionerRole",
+        "ifNoneExist": "identifier=https://aiofhir.dev/seed|role-seed-primary"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Practitioner",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "pract-seed-lab"
+          }
+        ],
+        "active": true,
+        "name": [
+          {
+            "family": "Seed",
+            "given": ["Lab"],
+            "prefix": ["Dr"]
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "Practitioner",
+        "ifNoneExist": "identifier=https://aiofhir.dev/seed|pract-seed-lab"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "PractitionerRole",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "role-seed-lab"
+          }
+        ],
+        "active": true,
+        "practitioner": {
+          "reference": "Practitioner?identifier=https://aiofhir.dev/seed|pract-seed-lab"
+        },
+        "organization": {
+          "reference": "Organization?identifier=https://aiofhir.dev/seed|org-seed-hospital"
+        },
+        "location": [
+          {
+            "reference": "Location?identifier=https://aiofhir.dev/seed|loc-seed-hospital"
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "PractitionerRole",
+        "ifNoneExist": "identifier=https://aiofhir.dev/seed|role-seed-lab"
+      }
+    }
+  ]
+}
