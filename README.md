@@ -90,11 +90,48 @@ for the seed and smoke scripts.
 
 ## 🛠️ Development
 
+You need [uv](https://docs.astral.sh/uv/) and [just](https://just.systems/).
+
 ```bash
-just check      # sync from uv.lock, then ruff, format check, mypy strict, pytest
+git clone https://github.com/dmorand17/aiofhir && cd aiofhir
+just sync       # install the project, all extras and the dev tools from uv.lock
+just check      # what CI runs: sync, lint, format check, mypy strict, pytest
 ```
 
-See [CHANGELOG.md](https://github.com/dmorand17/aiofhir/blob/main/CHANGELOG.md) for releases.
+Run `just` with no arguments to list every recipe.
+
+| Recipe | What it does |
+| --- | --- |
+| `just test [args]` | pytest; arguments pass through, for example `just test tests/test_record.py -k labs` |
+| `just lint` / `just fmt-check` | ruff lint / check formatting without writing files |
+| `just fmt` / `just fix` | format with ruff / apply ruff autofixes and format |
+| `just typecheck` | mypy strict over `src`, `tests`, `examples` and `haste` |
+| `just lock` | refresh `uv.lock` after changing dependencies |
+| `just serve` | run the `aiofhir[server]` backend; see [server-side token mode](https://github.com/dmorand17/aiofhir/blob/main/docs/server.md) for its environment |
+| `just discover` | print a server's SMART endpoints and the scope aiofhir would request, for `BASE` |
+
+### Live tests against Haste Health
+
+Unit tests use recorded fixtures and need no network. The live tests are opt-in
+and run against a seeded Haste project; [`haste/README.md`](https://github.com/dmorand17/aiofhir/blob/main/haste/README.md)
+covers setup.
+
+| Recipe | What it does |
+| --- | --- |
+| `just seed` | create or update the seed patient, chart, smoke client and access policy (`SEED_ALLOW_SEARCH=1` for the helpers) |
+| `just smoke` | sign in as the patient in a browser and print every helper; `SAVE_TOKENS=1` saves the token for the live tests |
+| `AIOFHIR_LIVE=1 just test tests/live` | the live checks, using the saved token |
+| `just check-policy` / `just check-policy-as-patient` | check the seed's access policy, as the admin or as the patient |
+| `just seed-cleanup` | delete the admin seed client |
+
+### Releasing
+
+1. Add the changes under a new version in `CHANGELOG.md`, and set the same
+   version in `pyproject.toml` (the only place it is defined).
+2. Merge to `main` and let CI pass.
+3. Publish a GitHub release tagged `v<version>`. The release workflow checks that
+   the tag matches `pyproject.toml`, reruns the checks, and uploads to PyPI with
+   trusted publishing.
 
 ## 📄 License
 
