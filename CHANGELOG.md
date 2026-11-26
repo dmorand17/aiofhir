@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/). Before 1.0, a minor version may
 change the API.
 
+## [Unreleased]
+
+### Security
+
+- `FhirError` messages are redacted: server diagnostics often echo patient ids,
+  identifiers or names. The raw OperationOutcome is kept on `FhirError.outcome`
+  (it can hold PHI; do not log it).
+
 ## [0.1.0] - 2026-11-25
 
 The first usable release. Haste Health is verified live; the Epic and Oracle

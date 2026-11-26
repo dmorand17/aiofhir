@@ -253,7 +253,8 @@ class FhirClient:
                 retries += 1
                 continue
             if response.status_code >= 400:
-                raise FhirError(response.status_code, _error_text(response))
+                text, outcome = _error_details(response)
+                raise FhirError(response.status_code, text, outcome=outcome)
             return response
 
     async def _emit(
@@ -373,11 +374,12 @@ def _within_base(base: str, url: str) -> bool:
     return right.path == prefix or right.path.startswith(prefix + "/")
 
 
-def _error_text(response: httpx.Response) -> str:
+def _error_details(response: httpx.Response) -> tuple[str, Json | None]:
+    """The error text (redacted later by FhirError) and the raw OperationOutcome, if any."""
     try:
         body = response.json()
     except ValueError:
-        return response.reason_phrase
+        return response.reason_phrase, None
     if isinstance(body, dict) and body.get("resourceType") == "OperationOutcome":
-        return "; ".join(_outcome_messages(body))
-    return response.reason_phrase
+        return "; ".join(_outcome_messages(body)), body
+    return response.reason_phrase, None

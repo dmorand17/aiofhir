@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from aiofhir.log import redact_text
+
 
 class AiofhirError(Exception):
     """Base error for aiofhir."""
@@ -20,11 +24,19 @@ class TokenError(AiofhirError):
 
 
 class FhirError(AiofhirError):
-    """A FHIR request failed."""
+    """A FHIR request failed.
 
-    def __init__(self, status: int, message: str) -> None:
+    The message is redacted (tokens, person references and identifying search
+    values), because servers often echo ids or names in their diagnostics and the
+    message ends up in logs, tracebacks and agent tool output. The server's raw
+    OperationOutcome, when there was one, is kept on `outcome`. It can hold PHI:
+    do not log it.
+    """
+
+    def __init__(self, status: int, message: str, *, outcome: dict[str, Any] | None = None) -> None:
         self.status = status
-        super().__init__(f"FHIR request failed ({status}): {message}")
+        self.outcome = outcome
+        super().__init__(f"FHIR request failed ({status}): {redact_text(message)}")
 
 
 class AuthExpired(AiofhirError):
