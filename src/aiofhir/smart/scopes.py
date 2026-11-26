@@ -23,7 +23,8 @@ READ_RESOURCES: tuple[str, ...] = (
 logger = logging.getLogger(__name__)
 
 
-def scopes_from_capabilities(configuration: SmartConfiguration) -> str:
+def scopes_from_capabilities(configuration: SmartConfiguration, *, ehr_launch: bool = False) -> str:
+    """The authorize scope. An EHR launch asks for `launch` instead of `launch/patient`."""
     capabilities = set(configuration.capabilities)
     if "permission-patient" in capabilities:
         context = "patient"
@@ -35,7 +36,10 @@ def scopes_from_capabilities(configuration: SmartConfiguration) -> str:
     supported = configuration.scopes_supported
     permission = _permission(capabilities, supported)
     parts = _resource_scopes(context, permission, supported)
-    parts.extend(_launch_scopes(context, capabilities, supported))
+    if ehr_launch:
+        parts.append("launch")
+    else:
+        parts.extend(_launch_scopes(context, capabilities, supported))
     parts.extend(_identity_scopes(capabilities, supported))
     refresh = _refresh_scope(capabilities, supported)
     if refresh is not None:

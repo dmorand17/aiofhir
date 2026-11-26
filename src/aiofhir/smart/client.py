@@ -5,11 +5,11 @@ from __future__ import annotations
 import base64
 import hmac
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode
 
 import httpx
 
@@ -30,6 +30,25 @@ class AuthorizationRequest:
     url: str
     state: str
     code_verifier: str
+
+
+@dataclass(frozen=True)
+class EhrLaunch:
+    iss: str
+    launch: str
+
+
+def parse_ehr_launch(query: str) -> EhrLaunch:
+    """Read `iss` and `launch` from the query string an EHR opens the app's launch URL with.
+
+    The `iss` is untrusted until `SmartClient.for_ehr_launch` checks it against an allowlist.
+    """
+    values = parse_qs(query.lstrip("?"))
+    iss = (values.get("iss") or [""])[0].strip()
+    launch = (values.get("launch") or [""])[0].strip()
+    if not iss or not launch:
+        raise ValueError("an EHR launch needs both iss and launch")
+    return EhrLaunch(iss=iss, launch=launch)
 
 
 class SmartClient:
@@ -54,10 +73,50 @@ class SmartClient:
         self.profile = profile or GenericProfile()
         self._clock = clock or (lambda: datetime.now(UTC))
         self.private_key = private_key
+        self.ehr_launch = False
 
-    async def authorization_request(self) -> AuthorizationRequest:
+    @classmethod
+    def for_ehr_launch(
+        cls,
+        iss: str,
+        *,
+        allowed_issuers: Iterable[str],
+        client_id: str,
+        redirect_uri: str,
+        scope: str | None = None,
+        client_secret: str | None = None,
+        profile: ServerProfile | None = None,
+        private_key: ClientAssertionKey | None = None,
+    ) -> SmartClient:
+        """A client for an EHR launch, discovering from `iss`.
+
+        `iss` comes from the launch URL, so anyone can choose it. Only an issuer in
+        `allowed_issuers` is accepted; otherwise the app would send its credentials
+        and the code to a token endpoint the sender picked.
+        """
+        base = iss.strip().rstrip("/")
+        allowed = {issuer.strip().rstrip("/") for issuer in allowed_issuers}
+        if not base or base not in allowed:
+            raise ValueError("iss is not an allowed issuer")
+        client = cls(
+            base,
+            client_id,
+            redirect_uri,
+            scope=scope,
+            client_secret=client_secret,
+            profile=profile,
+            private_key=private_key,
+        )
+        client.ehr_launch = True
+        return client
+
+    async def authorization_request(self, launch: str | None = None) -> AuthorizationRequest:
+        if self.ehr_launch and not launch:
+            raise ValueError("an EHR launch needs the launch value from the launch URL")
+        if launch and not self.ehr_launch:
+            raise ValueError("use SmartClient.for_ehr_launch for an EHR launch")
         configuration = await self._configuration()
-        scope = self.scope if self.scope is not None else scopes_from_capabilities(configuration)
+        scope = self._scope(configuration)
         logger.info("preparing authorization request for %s", self.client_id)
         logger.debug("authorization scope %s", scope)
         state = make_state()
@@ -72,6 +131,7 @@ class SmartClient:
                 "aud": self.base,
                 "code_challenge": challenge_s256(verifier),
                 "code_challenge_method": "S256",
+                **({"launch": launch} if launch else {}),
             }
         )
         return AuthorizationRequest(
@@ -82,7 +142,7 @@ class SmartClient:
 
     async def exchange_code(self, code: str, verifier: str) -> TokenSet:
         configuration = await self._configuration()
-        scope = self.scope if self.scope is not None else scopes_from_capabilities(configuration)
+        scope = self._scope(configuration)
         logger.info("exchanging authorization code for %s", self.client_id)
         body = await self._token_request(
             configuration,
@@ -134,6 +194,11 @@ class SmartClient:
             configuration, {"grant_type": "client_credentials", "scope": requested}
         )
         return self._token_set(body, requested, require_patient=False)
+
+    def _scope(self, configuration: SmartConfiguration) -> str:
+        if self.scope is not None:
+            return self.scope
+        return scopes_from_capabilities(configuration, ehr_launch=self.ehr_launch)
 
     async def _configuration(self) -> SmartConfiguration:
         async with httpx.AsyncClient() as http:
