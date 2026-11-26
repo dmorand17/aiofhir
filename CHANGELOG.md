@@ -28,6 +28,10 @@ change the API.
 - `FhirClient` retries reads and searches (GET and `POST [type]/_search`) after
   a dropped connection or a timeout, twice, with the same backoff and jitter as
   for 429/502/503/504. Each attempt reaches `on_request`.
+- A response body that is not JSON (say, an HTML page from a proxy) raises
+  `FhirError` from `read`, `vread`, `capabilities` and `search`, instead of a raw
+  `JSONDecodeError`. In SMART discovery it counts as a failed path, so the next
+  discovery path is tried and `DiscoveryError` is raised if none works.
 
 ## [0.1.0] - 2026-11-25
 

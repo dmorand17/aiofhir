@@ -52,7 +52,13 @@ async def discover(
         if response.status_code != 200:
             last_error = DiscoveryError(f"{url} returned {response.status_code}")
             continue
-        configuration = _parse(response.json())
+        try:
+            body = response.json()
+        except ValueError:
+            logger.debug("SMART configuration %s was not JSON", url)
+            last_error = DiscoveryError(f"{url} did not return JSON")
+            continue
+        configuration = _parse(body)
         if "S256" not in configuration.code_challenge_methods_supported:
             raise DiscoveryError("SMART configuration does not support S256 PKCE")
         _cache[key] = configuration

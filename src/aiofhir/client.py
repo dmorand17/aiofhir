@@ -106,11 +106,7 @@ class FhirClient:
         check_resource_type(resource_type)
         if not _RESOURCE_ID.match(resource_id) or resource_id in {".", ".."}:
             raise ValueError("not a valid FHIR resource id")
-        response = await self._send("GET", f"{self._base}/{resource_type}/{resource_id}")
-        body = response.json()
-        if not isinstance(body, dict):
-            raise FhirError(response.status_code, "response was not a JSON object")
-        return body
+        return _json_object(await self._send("GET", f"{self._base}/{resource_type}/{resource_id}"))
 
     async def vread(self, resource_type: str, resource_id: str, version_id: str) -> Json:
         check_resource_type(resource_type)
@@ -171,7 +167,7 @@ class FhirClient:
                 response = await self._send("POST", search_url, form=query or {})
             else:
                 response = await self._send("GET", url, params=query)
-            body = response.json()
+            body = _json_body(response)
             resources, warnings = _bundle_entries(body)
             pages += 1
             nxt = _next_link(body, url)
@@ -304,8 +300,18 @@ class FhirClient:
         return min(_MAX_RETRY_WAIT, backoff)
 
 
+def _json_body(response: httpx.Response) -> object:
+    """The parsed body. A body that is not JSON (an HTML error page from a proxy,
+    a captive portal, a truncated response) raises FhirError instead of a raw
+    JSONDecodeError."""
+    try:
+        return response.json()
+    except ValueError as exc:  # json.JSONDecodeError and UnicodeDecodeError are ValueErrors
+        raise FhirError(response.status_code, "response was not JSON") from exc
+
+
 def _json_object(response: httpx.Response) -> Json:
-    body = response.json()
+    body = _json_body(response)
     if not isinstance(body, dict):
         raise FhirError(response.status_code, "response was not a JSON object")
     return body
