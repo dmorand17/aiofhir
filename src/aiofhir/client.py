@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import random
 import re
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -27,7 +29,29 @@ _MAX_RETRY_WAIT = 30.0
 _OUTSIDE_BASE = "ignored next link outside the FHIR base (cross-origin or another path)"
 _RESOURCE_TYPE = re.compile(r"^[A-Z][A-Za-z]{1,63}$")
 _RESOURCE_ID = re.compile(r"^[A-Za-z0-9\-.]{1,64}$")
+# Longer GET URLs are sent as POST [type]/_search; many servers and proxies cap URLs.
+_MAX_GET_URL = 2000
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class RequestEvent:
+    """One attempt at a FHIR request, as a hook sees it.
+
+    `url` and `params` are redacted the same way as the debug logs: resource ids
+    in paths and person-identifying search values are replaced. No token is included.
+    """
+
+    method: str
+    url: str
+    params: dict[str, list[str]]
+    status: int | None
+    attempt: int
+    elapsed_ms: float
+    error: str | None = None
+
+
+RequestHook = Callable[[RequestEvent], Awaitable[None] | None]
 
 
 class TokenProvider(Protocol):
@@ -55,6 +79,7 @@ class FhirClient:
         timeout: float = 10.0,
         sleep: Sleep = asyncio.sleep,
         uniform: Uniform = random.uniform,
+        on_request: RequestHook | None = None,
     ) -> None:
         self._base = fhir_base_url.rstrip("/")
         self._provider = provider
@@ -64,6 +89,8 @@ class FhirClient:
         self._sleep = sleep
         self._uniform = uniform
         self._http: httpx.AsyncClient | None = None
+        self._on_request = on_request
+        self._capabilities: Json | None = None
 
     async def __aenter__(self) -> FhirClient:
         self._http = httpx.AsyncClient(timeout=self._timeout)
@@ -83,6 +110,20 @@ class FhirClient:
         if not isinstance(body, dict):
             raise FhirError(response.status_code, "response was not a JSON object")
         return body
+
+    async def vread(self, resource_type: str, resource_id: str, version_id: str) -> Json:
+        check_resource_type(resource_type)
+        for value in (resource_id, version_id):
+            if not _RESOURCE_ID.match(value) or value in {".", ".."}:
+                raise ValueError("not a valid FHIR resource or version id")
+        url = f"{self._base}/{resource_type}/{resource_id}/_history/{version_id}"
+        return _json_object(await self._send("GET", url))
+
+    async def capabilities(self) -> Json:
+        """The server's CapabilityStatement (`/metadata`), fetched once per client."""
+        if self._capabilities is None:
+            self._capabilities = _json_object(await self._send("GET", f"{self._base}/metadata"))
+        return self._capabilities
 
     async def search(
         self,
@@ -117,12 +158,18 @@ class FhirClient:
     ) -> AsyncIterator[SearchResult]:
         check_resource_type(resource_type)
         adapted = self.profile.adapt_search(resource_type, _normalize(params))
-        url: str | None = f"{self._base}/{resource_type}"
+        first = f"{self._base}/{resource_type}"
+        url: str | None = first
         query: dict[str, list[str]] | None = adapted or None
         pages = 0
         by_link = False
+        use_post = query is not None and len(str(httpx.URL(first, params=query))) > _MAX_GET_URL
         while url is not None and pages < max_pages:
-            response = await self._send("GET", url, params=query)
+            if use_post and not by_link:
+                search_url = f"{self._base}/{resource_type}/_search"
+                response = await self._send("POST", search_url, form=query or {})
+            else:
+                response = await self._send("GET", url, params=query)
             body = response.json()
             resources, warnings = _bundle_entries(body)
             pages += 1
@@ -158,30 +205,39 @@ class FhirClient:
         method: str,
         url: str,
         params: dict[str, list[str]] | None = None,
+        form: dict[str, list[str]] | None = None,
     ) -> httpx.Response:
         if self._http is None:
             raise FhirError(0, "client is not open")
         retries = 0
         refreshed = False
+        attempt = 0
         safe_url = redact_url(url)
-        safe_params = redact_params(params)
+        safe_params = redact_params(params if form is None else form)
         while True:
+            attempt += 1
             token = await self._provider.get()
             headers = {"Authorization": f"Bearer {token}", "Accept": "application/fhir+json"}
             logger.debug("%s %s params=%s", method, safe_url, safe_params)
+            started = time.monotonic()
             try:
                 async with self._semaphore:
                     response = await asyncio.wait_for(
-                        self._http.request(method, url, params=params, headers=headers),
+                        self._http.request(method, url, params=params, data=form, headers=headers),
                         self._timeout,
                     )
             except TimeoutError as exc:
                 logger.debug("%s %s timed out", method, safe_url)
+                await self._emit(method, safe_url, safe_params, None, attempt, started, "timeout")
                 raise FhirError(0, "request timed out") from exc
             except httpx.HTTPError as exc:
                 logger.debug("%s %s failed", method, safe_url)
+                await self._emit(
+                    method, safe_url, safe_params, None, attempt, started, "request failed"
+                )
                 raise FhirError(0, "request failed") from exc
             logger.debug("%s %s status=%s", method, safe_url, response.status_code)
+            await self._emit(method, safe_url, safe_params, response.status_code, attempt, started)
             if response.status_code == 401:
                 if not refreshed:
                     logger.info("received 401; refreshing the access token")
@@ -200,6 +256,25 @@ class FhirClient:
                 raise FhirError(response.status_code, _error_text(response))
             return response
 
+    async def _emit(
+        self,
+        method: str,
+        url: str,
+        params: dict[str, list[str]],
+        status: int | None,
+        attempt: int,
+        started: float,
+        error: str | None = None,
+    ) -> None:
+        if self._on_request is None:
+            return
+        elapsed = (time.monotonic() - started) * 1000.0
+        result = self._on_request(
+            RequestEvent(method, url, params, status, attempt, elapsed, error)
+        )
+        if inspect.isawaitable(result):
+            await result
+
     def _delay(self, response: httpx.Response, attempt: int) -> float:
         header = response.headers.get("Retry-After")
         if header is not None and header.strip().isdigit():
@@ -207,6 +282,13 @@ class FhirClient:
         jitter = float(self._uniform(0.5, 1.0))
         backoff = 0.5 * (2.0**attempt) * jitter
         return min(_MAX_RETRY_WAIT, backoff)
+
+
+def _json_object(response: httpx.Response) -> Json:
+    body = response.json()
+    if not isinstance(body, dict):
+        raise FhirError(response.status_code, "response was not a JSON object")
+    return body
 
 
 def _normalize(params: Params | None) -> dict[str, list[str]]:
