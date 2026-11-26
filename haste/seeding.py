@@ -44,8 +44,15 @@ _FHIR_ID = re.compile(r"^[A-Za-z0-9\-.]{1,64}$")
 # names the patient. Only these may be read or searched, and only for the seed
 # patient.
 COMPARTMENT_TYPES: dict[str, tuple[str, ...]] = {
-    "subject": ("Observation", "Condition", "MedicationRequest"),
-    "patient": ("AllergyIntolerance",),
+    "subject": (
+        "Observation",
+        "Condition",
+        "MedicationRequest",
+        "Encounter",
+        "Procedure",
+        "DocumentReference",
+    ),
+    "patient": ("AllergyIntolerance", "Immunization"),
     "participant.actor": ("Appointment",),
 }
 # Reference data outside any patient compartment that the helpers read by id
@@ -378,7 +385,81 @@ def build_chart(patient_id: str, now: datetime) -> list[Json]:
             "effectiveDateTime": (now - timedelta(days=20)).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "valueQuantity": {"value": 6.1, "unit": "%"},
         },
+        {
+            "resourceType": "Observation",
+            "id": "vital-bp",
+            "identifier": _identifier("vital-bp"),
+            "subject": subject,
+            "status": "final",
+            "category": [{"coding": [{"code": "vital-signs"}]}],
+            "code": {"text": "Blood pressure"},
+            "effectiveDateTime": _stamp(now - timedelta(days=5)),
+            "component": [
+                {
+                    "code": {"coding": [{"system": "http://loinc.org", "code": "8462-4"}]},
+                    "valueQuantity": {"value": 78, "unit": "mmHg"},
+                },
+                {
+                    "code": {"coding": [{"system": "http://loinc.org", "code": "8480-6"}]},
+                    "valueQuantity": {"value": 118, "unit": "mmHg"},
+                },
+            ],
+        },
+        {
+            "resourceType": "Observation",
+            "id": "vital-weight",
+            "identifier": _identifier("vital-weight"),
+            "subject": subject,
+            "status": "final",
+            "category": [{"coding": [{"code": "vital-signs"}]}],
+            "code": {"text": "Body weight"},
+            "effectiveDateTime": _stamp(now - timedelta(days=5)),
+            "valueQuantity": {"value": 70.2, "unit": "kg"},
+        },
+        {
+            "resourceType": "Immunization",
+            "id": "imm-flu",
+            "identifier": _identifier("imm-flu"),
+            "patient": subject,
+            "status": "completed",
+            "vaccineCode": {"text": "Influenza, seasonal"},
+            "occurrenceDateTime": _stamp(now - timedelta(days=60)),
+        },
+        {
+            "resourceType": "Encounter",
+            "id": "enc-checkup",
+            "identifier": _identifier("enc-checkup"),
+            "subject": subject,
+            "status": "finished",
+            "class": {"code": "AMB"},
+            "type": [{"text": "Annual checkup"}],
+            "period": {"start": _stamp(now - timedelta(days=30))},
+        },
+        {
+            "resourceType": "Procedure",
+            "id": "proc-spirometry",
+            "identifier": _identifier("proc-spirometry"),
+            "subject": subject,
+            "status": "completed",
+            "code": {"text": "Spirometry"},
+            "performedDateTime": _stamp(now - timedelta(days=30)),
+        },
+        {
+            "resourceType": "DocumentReference",
+            "id": "doc-visit-note",
+            "identifier": _identifier("doc-visit-note"),
+            "subject": subject,
+            "status": "current",
+            "description": "Annual checkup note",
+            "type": {"text": "Progress note"},
+            "date": _stamp(now - timedelta(days=30)),
+            "content": [{"attachment": {"contentType": "text/plain", "title": "Visit note"}}],
+        },
     ]
+
+
+def _stamp(moment: datetime) -> str:
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def build_chart_bundle(patient_id: str, now: datetime) -> Json:

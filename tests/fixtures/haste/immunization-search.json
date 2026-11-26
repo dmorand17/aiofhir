@@ -1,0 +1,29 @@
+{
+  "entry": [
+    {
+      "resource": {
+        "id": "imm-flu",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "imm-flu"
+          }
+        ],
+        "occurrenceDateTime": "2026-09-27T03:07:29+00:00",
+        "patient": {
+          "reference": "Patient/example-patient"
+        },
+        "resourceType": "Immunization",
+        "status": "completed",
+        "vaccineCode": {
+          "text": "Influenza, seasonal"
+        }
+      },
+      "search": {
+        "mode": "match"
+      }
+    }
+  ],
+  "resourceType": "Bundle",
+  "type": "searchset"
+}

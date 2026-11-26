@@ -15,6 +15,10 @@ READ_RESOURCES: tuple[str, ...] = (
     "AllergyIntolerance",
     "Condition",
     "Observation",
+    "Immunization",
+    "Encounter",
+    "Procedure",
+    "DocumentReference",
 )
 logger = logging.getLogger(__name__)
 

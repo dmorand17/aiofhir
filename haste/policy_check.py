@@ -108,6 +108,10 @@ def policy_cases(
         ("read own Condition", "Condition/condition-asthma"),
         ("read own AllergyIntolerance", "AllergyIntolerance/allergy-peanut"),
         ("read own MedicationRequest", "MedicationRequest/mr-inline"),
+        ("read own Immunization", "Immunization/imm-flu"),
+        ("read own Encounter", "Encounter/enc-checkup"),
+        ("read own Procedure", "Procedure/proc-spirometry"),
+        ("read own DocumentReference", "DocumentReference/doc-visit-note"),
         ("read a referenced Medication", "Medication/med-remote"),
     ]
     if appointment_id:
@@ -120,6 +124,11 @@ def policy_cases(
         ("medication requests", f"MedicationRequest?patient={p}&status=active"),
         ("allergies", f"AllergyIntolerance?patient={p}&clinical-status=active"),
         ("conditions", f"Condition?patient={p}&category=problem-list-item"),
+        ("immunizations", f"Immunization?patient={p}&status=completed"),
+        ("vital signs", f"Observation?patient={p}&category=vital-signs"),
+        ("past visits", f"Encounter?patient={p}&status=finished"),
+        ("procedures", f"Procedure?patient={p}&status=completed"),
+        ("documents", f"DocumentReference?patient={p}&status=current"),
     ]
     deny = [
         ("read another Patient", f"Patient/{o}"),

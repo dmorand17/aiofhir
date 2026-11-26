@@ -34,6 +34,14 @@ SEARCHES: dict[str, tuple[str, dict[str, str]]] = {
         "Observation",
         {"patient": "{patient}", "category": "laboratory"},
     ),
+    "vital-signs-search.json": (
+        "Observation",
+        {"patient": "{patient}", "category": "vital-signs"},
+    ),
+    "immunization-search.json": ("Immunization", {"patient": "{patient}"}),
+    "encounter-search.json": ("Encounter", {"patient": "{patient}"}),
+    "procedure-search.json": ("Procedure", {"patient": "{patient}"}),
+    "documentreference-search.json": ("DocumentReference", {"patient": "{patient}"}),
 }
 
 

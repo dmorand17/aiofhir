@@ -79,6 +79,10 @@ async def test_run_smoke_prints_helpers_forces_refresh_and_hides_tokens() -> Non
             "AllergyIntolerance",
             "Condition",
             "Observation",
+            "Immunization",
+            "Encounter",
+            "Procedure",
+            "DocumentReference",
         ):
             respx.get(f"{BASE}/{resource}").respond(
                 200,
@@ -178,6 +182,10 @@ async def test_run_smoke_hands_out_the_exchanged_and_refreshed_tokens() -> None:
             "AllergyIntolerance",
             "Condition",
             "Observation",
+            "Immunization",
+            "Encounter",
+            "Procedure",
+            "DocumentReference",
         ):
             respx.get(f"{BASE}/{resource}").respond(
                 200, json={"resourceType": "Bundle", "entry": []}

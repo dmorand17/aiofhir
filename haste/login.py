@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from aiofhir import FhirClient, PatientRecord
+from aiofhir import RECORD_HELPERS, FhirClient, PatientRecord
 from aiofhir.display import format_summary
 from aiofhir.errors import TokenError
 from aiofhir.profiles import HasteProfile
@@ -25,13 +25,7 @@ REDIRECT_URI = "http://localhost:8765/callback"
 SEED_LOGIN_SCOPE = "user/*.cruds openid fhirUser"
 logger = logging.getLogger(__name__)
 Browser = Callable[[str], Awaitable[None] | None]
-_HELPERS = (
-    "upcoming_appointments",
-    "active_medications",
-    "allergies",
-    "conditions",
-    "recent_labs",
-)
+_HELPERS = RECORD_HELPERS
 
 
 CALLBACK_TIMEOUT = 300.0

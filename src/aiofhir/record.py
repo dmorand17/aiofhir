@@ -19,6 +19,10 @@ _ALLOWED = frozenset(
         "AllergyIntolerance",
         "Condition",
         "Observation",
+        "Immunization",
+        "Encounter",
+        "Procedure",
+        "DocumentReference",
     }
 )
 _UPCOMING = frozenset({"booked", "pending"})
@@ -62,6 +66,16 @@ class Record(Protocol):
     async def conditions(self) -> Summary: ...
 
     async def recent_labs(self, days: int = 90) -> Summary: ...
+
+    async def immunizations(self) -> Summary: ...
+
+    async def vital_signs(self, days: int = 30) -> Summary: ...
+
+    async def past_visits(self, days: int = 365) -> Summary: ...
+
+    async def procedures(self, days: int = 365) -> Summary: ...
+
+    async def documents(self, days: int = 365) -> Summary: ...
 
 
 # The helper names, from the Protocol. The server's allowlist is built from these.
@@ -191,6 +205,82 @@ class PatientRecord:
         ]
         return _summary("recent_labs", items, result)
 
+    async def immunizations(self) -> Summary:
+        return await self._dated(
+            "immunizations",
+            "Immunization",
+            {"status": "completed"},
+            keep=lambda r: r.get("status") == "completed",
+            text=lambda r: _code_text(r.get("vaccineCode")),
+            when=lambda r: _first_str(r, "occurrenceDateTime"),
+        )
+
+    async def vital_signs(self, days: int = 30) -> Summary:
+        return await self._dated(
+            "vital_signs",
+            "Observation",
+            {"category": "vital-signs", "date": [f"ge{self._since(days)}"]},
+            keep=lambda r: True,
+            text=_vital_text,
+            when=_effective,
+        )
+
+    async def past_visits(self, days: int = 365) -> Summary:
+        return await self._dated(
+            "past_visits",
+            "Encounter",
+            {"status": "finished", "date": [f"ge{self._since(days)}"]},
+            keep=lambda r: r.get("status") == "finished",
+            text=_visit_text,
+            when=lambda r: _period_start(r, "period"),
+        )
+
+    async def procedures(self, days: int = 365) -> Summary:
+        return await self._dated(
+            "procedures",
+            "Procedure",
+            {"status": "completed", "date": [f"ge{self._since(days)}"]},
+            keep=lambda r: r.get("status") == "completed",
+            text=lambda r: _code_text(r.get("code")),
+            when=lambda r: (
+                _first_str(r, "performedDateTime") or _period_start(r, "performedPeriod")
+            ),
+        )
+
+    async def documents(self, days: int = 365) -> Summary:
+        # Titles and dates only: content, attachments and narrative are never read.
+        return await self._dated(
+            "documents",
+            "DocumentReference",
+            {"status": "current", "date": [f"ge{self._since(days)}"]},
+            keep=lambda r: r.get("status") == "current",
+            text=lambda r: _first_str(r, "description") or _code_text(r.get("type")),
+            when=lambda r: _first_str(r, "date"),
+        )
+
+    def _since(self, days: int) -> str:
+        return _instant(self._clock() - timedelta(days=days))
+
+    async def _dated(
+        self,
+        kind: str,
+        resource_type: str,
+        params: Params,
+        *,
+        keep: Callable[[dict[str, Any]], bool],
+        text: Callable[[dict[str, Any]], str],
+        when: Callable[[dict[str, Any]], str],
+    ) -> Summary:
+        """Search, keep matching records (servers may ignore filters), newest first."""
+        result = await self.search_raw(resource_type, params)
+        kept = [resource for resource in result.resources if keep(resource)]
+        kept.sort(key=when, reverse=True)
+        items = [
+            Item(text(r), _cite(resource_type, r), at=parse_fhir_datetime(when(r) or None))
+            for r in kept
+        ]
+        return _summary(kind, items, result)
+
 
 def _summary(kind: str, items: list[Item], result: SearchResult) -> Summary:
     logger.debug(
@@ -261,7 +351,7 @@ def _lab_text(resource: dict[str, Any]) -> str:
     quantity = resource.get("valueQuantity")
     if isinstance(quantity, dict) and isinstance(quantity.get("value"), int | float):
         unit = quantity.get("unit") or quantity.get("code") or ""
-        value = f"{quantity['value']} {unit}".strip()
+        value = f"{_number(quantity['value'])} {unit}".strip()
         return f"{name}: {value}" if name else value
     string_value = resource.get("valueString")
     if isinstance(string_value, str) and string_value:
@@ -270,6 +360,13 @@ def _lab_text(resource: dict[str, Any]) -> str:
     if concept:
         return f"{name}: {concept}" if name else concept
     return name
+
+
+def _number(value: float | int) -> str:
+    """FHIR decimals arrive as JSON floats; print 118.0 as 118 (it is read aloud)."""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
 
 
 def _with_dosage(text: str, resource: dict[str, Any]) -> str:
@@ -301,3 +398,49 @@ def _has_category(resource: dict[str, Any], code: str) -> bool:
         if code in _codes(category):
             return True
     return False
+
+
+_SYSTOLIC = "8480-6"
+_DIASTOLIC = "8462-4"
+
+
+def _vital_text(resource: dict[str, Any]) -> str:
+    """Like a lab, but a blood pressure reads its components as systolic/diastolic."""
+    values: dict[str, tuple[float | int, str]] = {}
+    for component in resource.get("component") or []:
+        if not isinstance(component, dict):
+            continue
+        quantity = component.get("valueQuantity")
+        if not isinstance(quantity, dict) or not isinstance(quantity.get("value"), int | float):
+            continue
+        unit = str(quantity.get("unit") or quantity.get("code") or "")
+        for code in _codes(component.get("code")):
+            values[code] = (quantity["value"], unit)
+    if _SYSTOLIC in values and _DIASTOLIC in values:
+        (systolic, unit), (diastolic, _) = values[_SYSTOLIC], values[_DIASTOLIC]
+        name = _code_text(resource.get("code")) or "Blood pressure"
+        return f"{name}: {_number(systolic)}/{_number(diastolic)} {unit}".strip()
+    return _lab_text(resource)
+
+
+def _visit_text(resource: dict[str, Any]) -> str:
+    for kind in resource.get("type") or []:
+        text = _code_text(kind)
+        if text:
+            return text
+    visit_class = resource.get("class")
+    if isinstance(visit_class, dict):
+        return str(visit_class.get("display") or visit_class.get("code") or "")
+    return ""
+
+
+def _first_str(resource: dict[str, Any], key: str) -> str:
+    value = resource.get(key)
+    return value if isinstance(value, str) else ""
+
+
+def _period_start(resource: dict[str, Any], key: str) -> str:
+    period = resource.get(key)
+    if isinstance(period, dict) and isinstance(period.get("start"), str):
+        return str(period["start"])
+    return ""

@@ -47,11 +47,25 @@ async def test_recorded_configuration_derives_the_scope_haste_accepted() -> None
 
 async def test_helpers_summarize_the_recorded_haste_record() -> None:
     with respx.mock:
-        for resource in ("Appointment", "MedicationRequest", "AllergyIntolerance", "Condition"):
+        for resource in (
+            "Appointment",
+            "MedicationRequest",
+            "AllergyIntolerance",
+            "Condition",
+            "Immunization",
+            "Encounter",
+            "Procedure",
+            "DocumentReference",
+        ):
             respx.get(f"{BASE}/{resource}").respond(
                 200, json=_load(f"{resource.lower()}-search.json")
             )
-        respx.get(f"{BASE}/Observation").respond(200, json=_load("observation-search.json"))
+        respx.get(f"{BASE}/Observation", params={"category": "vital-signs"}).respond(
+            200, json=_load("vital-signs-search.json")
+        )
+        respx.get(f"{BASE}/Observation", params={"category": "laboratory"}).respond(
+            200, json=_load("observation-search.json")
+        )
         respx.get(f"{BASE}/Medication/med-remote").respond(
             200, json=_load("medication-med-remote.json")
         )
@@ -62,6 +76,11 @@ async def test_helpers_summarize_the_recorded_haste_record() -> None:
             allergies = await record.allergies()
             conditions = await record.conditions()
             labs = await record.recent_labs()
+            immunizations = await record.immunizations()
+            vitals = await record.vital_signs()
+            visits = await record.past_visits()
+            procedures = await record.procedures()
+            documents = await record.documents()
     # The recorded Bundle also holds the past (fulfilled) and cancelled visits.
     assert [item.text for item in upcoming.items] == [
         "appt-booked-3",
@@ -73,5 +92,16 @@ async def test_helpers_summarize_the_recorded_haste_record() -> None:
     assert [item.text for item in allergies.items] == ["Peanut"]
     assert [item.text for item in conditions.items] == ["Asthma"]
     assert [item.text for item in labs.items] == ["A1c: 6.1 %"]
-    for summary in (upcoming, meds, allergies, conditions, labs):
-        assert all(item.citation.id for item in summary.items)
+    assert [item.text for item in immunizations.items] == ["Influenza, seasonal"]
+    # Haste returns decimals as floats (118.0); they print as whole numbers.
+    assert sorted(item.text for item in vitals.items) == [
+        "Blood pressure: 118/78 mmHg",
+        "Body weight: 70.2 kg",
+    ]
+    assert [item.text for item in visits.items] == ["Annual checkup"]
+    assert [item.text for item in procedures.items] == ["Spirometry"]
+    assert [item.text for item in documents.items] == ["Annual checkup note"]
+    summaries = [upcoming, meds, allergies, conditions, labs]
+    summaries += [immunizations, vitals, visits, procedures, documents]
+    for summary in summaries:
+        assert summary.items and all(item.citation.id for item in summary.items)

@@ -1,0 +1,38 @@
+{
+  "entry": [
+    {
+      "resource": {
+        "content": [
+          {
+            "attachment": {
+              "contentType": "text/plain",
+              "title": "Visit note"
+            }
+          }
+        ],
+        "date": "2026-10-27T03:07:29+00:00",
+        "description": "Annual checkup note",
+        "id": "doc-visit-note",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "doc-visit-note"
+          }
+        ],
+        "resourceType": "DocumentReference",
+        "status": "current",
+        "subject": {
+          "reference": "Patient/example-patient"
+        },
+        "type": {
+          "text": "Progress note"
+        }
+      },
+      "search": {
+        "mode": "match"
+      }
+    }
+  ],
+  "resourceType": "Bundle",
+  "type": "searchset"
+}

@@ -69,6 +69,21 @@ class RemoteRecord:
     async def recent_labs(self, days: int = 90) -> Summary:
         return await self._call("recent_labs", {"days": days})
 
+    async def immunizations(self) -> Summary:
+        return await self._call("immunizations", {})
+
+    async def vital_signs(self, days: int = 30) -> Summary:
+        return await self._call("vital_signs", {"days": days})
+
+    async def past_visits(self, days: int = 365) -> Summary:
+        return await self._call("past_visits", {"days": days})
+
+    async def procedures(self, days: int = 365) -> Summary:
+        return await self._call("procedures", {"days": days})
+
+    async def documents(self, days: int = 365) -> Summary:
+        return await self._call("documents", {"days": days})
+
     async def _call(self, method: str, args: dict[str, Any]) -> Summary:
         if self._client is None:
             self._client = httpx.AsyncClient(timeout=self._timeout)

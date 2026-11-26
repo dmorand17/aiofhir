@@ -1,6 +1,6 @@
 # AGENTS.md
 
-`aiofhir` is a thin async FHIR R4 and SMART on FHIR client. The design lives in `plans/PLAN-merged.md`. Phase 4 is server-side token mode (`RemoteRecord` and the `aiofhir[server]` backend). The next implementation phase is Phase 5: more helpers. Do not start a later phase in the same change.
+`aiofhir` is a thin async FHIR R4 and SMART on FHIR client. The design lives in `plans/PLAN-merged.md`. Phase 5 added the second set of record helpers. The next implementation phase is Phase 6: auth extensions. Phase 8 (Epic and Cerner sandboxes) waits for sandbox access. Do not start a later phase in the same change.
 
 When a plan item is finished, check it off in `plans/PLAN-merged.md` in the same change. Check it only when its code and tests pass.
 

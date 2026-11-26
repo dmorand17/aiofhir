@@ -22,7 +22,18 @@ FHIR = "https://fhir.example/r4"
 BACKEND = "http://backend"
 SERVICE = "service-secret"
 SUBJECT = "user:42"
-HELPERS = ("upcoming_appointments", "active_medications", "allergies", "conditions", "recent_labs")
+HELPERS = (
+    "upcoming_appointments",
+    "active_medications",
+    "allergies",
+    "conditions",
+    "recent_labs",
+    "immunizations",
+    "vital_signs",
+    "past_visits",
+    "procedures",
+    "documents",
+)
 
 
 def _tokens() -> TokenSet:

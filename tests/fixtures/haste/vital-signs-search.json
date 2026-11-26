@@ -1,0 +1,104 @@
+{
+  "entry": [
+    {
+      "resource": {
+        "category": [
+          {
+            "coding": [
+              {
+                "code": "vital-signs"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "text": "Blood pressure"
+        },
+        "component": [
+          {
+            "code": {
+              "coding": [
+                {
+                  "code": "8462-4",
+                  "system": "http://loinc.org"
+                }
+              ]
+            },
+            "valueQuantity": {
+              "unit": "mmHg",
+              "value": 78.0
+            }
+          },
+          {
+            "code": {
+              "coding": [
+                {
+                  "code": "8480-6",
+                  "system": "http://loinc.org"
+                }
+              ]
+            },
+            "valueQuantity": {
+              "unit": "mmHg",
+              "value": 118.0
+            }
+          }
+        ],
+        "effectiveDateTime": "2026-11-21T03:07:29+00:00",
+        "id": "vital-bp",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "vital-bp"
+          }
+        ],
+        "resourceType": "Observation",
+        "status": "final",
+        "subject": {
+          "reference": "Patient/example-patient"
+        }
+      },
+      "search": {
+        "mode": "match"
+      }
+    },
+    {
+      "resource": {
+        "category": [
+          {
+            "coding": [
+              {
+                "code": "vital-signs"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "text": "Body weight"
+        },
+        "effectiveDateTime": "2026-11-21T03:07:29+00:00",
+        "id": "vital-weight",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "vital-weight"
+          }
+        ],
+        "resourceType": "Observation",
+        "status": "final",
+        "subject": {
+          "reference": "Patient/example-patient"
+        },
+        "valueQuantity": {
+          "unit": "kg",
+          "value": 70.2
+        }
+      },
+      "search": {
+        "mode": "match"
+      }
+    }
+  ],
+  "resourceType": "Bundle",
+  "type": "searchset"
+}

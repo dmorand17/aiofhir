@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 from dotenv import load_dotenv
 
-from aiofhir import FhirClient, PatientRecord
+from aiofhir import RECORD_HELPERS, FhirClient, PatientRecord
 from aiofhir.display import format_summary
 from aiofhir.profiles import HasteProfile
 from aiofhir.smart import RefreshingToken, SmartClient, TokenSet
@@ -26,13 +26,7 @@ from haste.login import REDIRECT_URI, load_tokens, save_tokens
 from haste.seeding import CLIENT_ID, SEED_SYSTEM
 
 _ROOT = Path(__file__).resolve().parents[2]
-_HELPERS = (
-    "upcoming_appointments",
-    "active_medications",
-    "allergies",
-    "conditions",
-    "recent_labs",
-)
+_HELPERS = RECORD_HELPERS
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("AIOFHIR_LIVE") != "1",

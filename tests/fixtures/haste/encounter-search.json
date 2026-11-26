@@ -1,0 +1,36 @@
+{
+  "entry": [
+    {
+      "resource": {
+        "class": {
+          "code": "AMB"
+        },
+        "id": "enc-checkup",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "enc-checkup"
+          }
+        ],
+        "period": {
+          "start": "2026-10-27T03:07:29+00:00"
+        },
+        "resourceType": "Encounter",
+        "status": "finished",
+        "subject": {
+          "reference": "Patient/example-patient"
+        },
+        "type": [
+          {
+            "text": "Annual checkup"
+          }
+        ]
+      },
+      "search": {
+        "mode": "match"
+      }
+    }
+  ],
+  "resourceType": "Bundle",
+  "type": "searchset"
+}
