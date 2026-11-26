@@ -23,7 +23,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from aiofhir.scrub import scrub
+from aiofhir.scrub import SECRET_KEYS, scrub
 
 LOG_FORMAT = "%(asctime)s %(levelname)-5s %(name)s: %(message)s"
 REDACTED = "[redacted]"
@@ -47,12 +47,36 @@ _HIDDEN_QUERY = frozenset(
         "address-postalcode",
         "user",
         "link",
+        # References that usually point at a person (Appointment.actor, Observation.performer, ...).
+        "actor",
+        "performer",
+        "requester",
+        "participant",
+        "author",
+        "beneficiary",
+        "general-practitioner",
+        "asserter",
+        "recorder",
+        # Free-text search can carry names.
+        "_text",
+        "_content",
+        # Credentials, should one ever reach a URL.
+        *SECRET_KEYS,
     }
 )
 # Resource types whose ids are redacted in URL paths and log messages.
 _PERSON_TYPES = ("Patient", "User", "Person", "RelatedPerson", "Membership")
 _PATH_TYPE = re.compile(r"^[A-Z][A-Za-z]+$")
-_PERSON_REF = re.compile(r"\b(" + "|".join(_PERSON_TYPES) + r")/[A-Za-z0-9\-.]{1,64}")
+# `Patient/123`, also URL-encoded (`Patient%2F123`) and inside absolute URLs.
+_PERSON_REF = re.compile(
+    r"\b(" + "|".join(_PERSON_TYPES) + r")(?:/|%2[Ff])(?!\[id\])[A-Za-z0-9\-.]{1,64}"
+)
+# `patient=123`, `subject:Patient=123`, `actor=...` inside free text such as a log line.
+_HIDDEN_ASSIGNMENT = re.compile(
+    r"(?<![\w-])("
+    + "|".join(re.escape(key) for key in sorted(_HIDDEN_QUERY, key=len, reverse=True))
+    + r")((?:[:.][\w\-]+)*)=([^&\s\"',;)]+)"
+)
 _HANDLER_NAME = "aiofhir-cli"
 
 
@@ -76,7 +100,7 @@ def redact_url(url: str) -> str:
     parts = urlsplit(url)
     path = redact_path(parts.path)
     pairs = parse_qsl(parts.query, keep_blank_values=True)
-    hidden = [(key, REDACTED if _hidden(key) else value) for key, value in pairs]
+    hidden = [(key, REDACTED if _hidden(key) else _redact_refs(value)) for key, value in pairs]
     query = urlencode(hidden) if pairs else parts.query
     return urlunsplit((parts.scheme, parts.netloc, path, query, parts.fragment))
 
@@ -88,14 +112,26 @@ def redact_params(
     if not params:
         return {}
     return {
-        key: [REDACTED] if _hidden(key) else [str(value) for value in values]
+        key: [REDACTED] if _hidden(key) else [_redact_refs(str(value)) for value in values]
         for key, values in params.items()
     }
 
 
+def _redact_refs(text: str) -> str:
+    """Replace the id in every person reference, whatever key or field it sits in."""
+    return _PERSON_REF.sub(lambda match: f"{match.group(1)}/[id]", text)
+
+
 def redact_text(text: str) -> str:
-    """Scrub tokens and person references from free text such as a log line."""
-    return _PERSON_REF.sub(lambda match: f"{match.group(1)}/[id]", scrub(text))
+    """Scrub tokens, person references and identifying search values from free text.
+
+    Best effort: a bare id with nothing around it (say, a subject on its own) cannot
+    be recognized, so keep treating logs as sensitive.
+    """
+    text = _redact_refs(scrub(text))
+    return _HIDDEN_ASSIGNMENT.sub(
+        lambda match: f"{match.group(1)}{match.group(2)}={REDACTED}", text
+    )
 
 
 class RedactingFilter(logging.Filter):

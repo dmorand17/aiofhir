@@ -14,6 +14,14 @@ change the API.
   (it can hold PHI; do not log it).
 - `RedactingFilter` also redacts tracebacks (`logger.exception`, `exc_info=True`)
   and `stack_info`, not only the message.
+- Wider redaction in `scrub()`, `redact_text()`, `redact_url()` and
+  `redact_params()`: `actor`, `performer`, `requester`, `participant`, `author`,
+  `beneficiary`, `general-practitioner`, `asserter`, `recorder`, `_text` and
+  `_content` values; person references under any key, URL-encoded or inside
+  absolute URLs; `patient=...`-style values inside free text; `bearer` in any
+  case and `Authorization: Basic` credentials; `client_secret`, `code_verifier`,
+  `client_assertion` and `password` fields; token values in form bodies, query
+  strings and Python dict reprs.
 
 ## [0.1.0] - 2026-11-25
 
