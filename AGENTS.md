@@ -1,6 +1,6 @@
 # AGENTS.md
 
-`aiofhir` is a thin async FHIR R4 and SMART on FHIR client. The design lives in `plans/PLAN-merged.md`. Phase 6 added auth extensions (`private_key_jwt`, `client_credentials`, EHR launch) and client extras. The next implementation phase is Phase 7: the release. Phase 8 (Epic and Cerner sandboxes) waits for sandbox access. Do not start a later phase in the same change.
+`aiofhir` is a thin async FHIR R4 and SMART on FHIR client. The design lives in `plans/PLAN-merged.md`. Phase 7 released 0.1.0 to PyPI. The remaining phase is Phase 8 (Epic and Cerner sandboxes), which waits for sandbox access. Add changes to `CHANGELOG.md`; a release is a GitHub release whose tag matches the version in `pyproject.toml`. Phase 8 (Epic and Cerner sandboxes) waits for sandbox access. Do not start a later phase in the same change.
 
 When a plan item is finished, check it off in `plans/PLAN-merged.md` in the same change. Check it only when its code and tests pass.
 
