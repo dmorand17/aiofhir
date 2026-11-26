@@ -1,6 +1,6 @@
 # AGENTS.md
 
-`aiofhir` is a thin async FHIR R4 and SMART on FHIR client. The design lives in `plans/PLAN-merged.md`. Phase 2 is server profiles. The next implementation phase is Phase 3: a live Haste seed and smoke script. Do not start a later phase in the same change.
+`aiofhir` is a thin async FHIR R4 and SMART on FHIR client. The design lives in `plans/PLAN-merged.md`. Phase 4 is server-side token mode (`RemoteRecord` and the `aiofhir[server]` backend). The next implementation phase is Phase 5: more helpers. Do not start a later phase in the same change.
 
 When a plan item is finished, check it off in `plans/PLAN-merged.md` in the same change. Check it only when its code and tests pass.
 
@@ -12,7 +12,8 @@ When a plan item is finished, check it off in `plans/PLAN-merged.md` in the same
 
 ## Library rules
 
-- Importing `aiofhir` must not load `fastapi`. The FastAPI reference server is a later optional extra and stays out of the core import.
+- Importing `aiofhir` must not load `fastapi`. The FastAPI reference server is the optional `aiofhir[server]` extra and stays out of the core import. `RemoteRecord` uses httpx only.
+- The `aiofhir[server]` backend runs beside the application's backend, never on an agent worker. It never logs tokens, subjects, `state` or callback URLs.
 - The patient id comes only from the token response. Helpers add `patient=` themselves and do not accept it as an argument.
 - Scopes come from the server's SMART `capabilities` and `scopes_supported`. Profiles adjust search and medication behavior. They do not choose scopes.
 - An explicit `scope=` is only for an app registration that allows less than the server advertises.

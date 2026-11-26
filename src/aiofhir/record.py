@@ -6,7 +6,7 @@ import logging
 import re
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, date, datetime, timedelta
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from aiofhir.client import FhirClient, SearchResult
 from aiofhir.summary import Citation, Item, Summary
@@ -42,6 +42,32 @@ _REFUSED_PARAMS = frozenset(
 )
 Params = Mapping[str, str | Sequence[str]]
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class Record(Protocol):
+    """The patient-record helpers.
+
+    `PatientRecord` runs them in process with a FHIR token; `RemoteRecord` asks
+    the `aiofhir[server]` backend, which runs a `PatientRecord`. Agent code can
+    accept either one, or a test fake.
+    """
+
+    async def upcoming_appointments(self, days: int = 90) -> Summary: ...
+
+    async def active_medications(self) -> Summary: ...
+
+    async def allergies(self) -> Summary: ...
+
+    async def conditions(self) -> Summary: ...
+
+    async def recent_labs(self, days: int = 90) -> Summary: ...
+
+
+# The helper names, from the Protocol. The server's allowlist is built from these.
+RECORD_HELPERS: tuple[str, ...] = tuple(
+    name for name, value in vars(Record).items() if not name.startswith("_") and callable(value)
+)
 
 
 class PatientRecord:

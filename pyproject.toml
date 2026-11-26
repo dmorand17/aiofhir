@@ -17,7 +17,14 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+# Reference backend for RemoteRecord. Never imported by `import aiofhir`.
+server = [
+    "cryptography>=43",
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+]
 dev = [
+    "aiofhir[server]",
     "mypy>=1.14",
     "pytest>=8.3",
     "pytest-asyncio>=0.25",

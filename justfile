@@ -61,3 +61,7 @@ check-policy-as-patient:
 # Sign in with the browser and print the record helpers.
 smoke:
     uv run python -m haste.smoke
+
+# Run the aiofhir[server] reference backend. See src/aiofhir/server/__main__.py for its env.
+serve:
+    uv run python -m aiofhir.server
