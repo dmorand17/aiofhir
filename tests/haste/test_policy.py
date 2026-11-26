@@ -16,12 +16,15 @@ from haste.policy_check import (
     CaseResult,
     PolicyCase,
     client_is_confidential,
+    describe_claims,
     evaluate_case,
     evaluate_parameters,
     gap_count,
     is_type_search,
+    patient_token_problem,
     policy_cases,
     probe_cases,
+    token_claims,
 )
 from haste.policy_model import PolicyError, decide, evaluate_policy, parse_request
 from haste.seeding import (
@@ -578,3 +581,69 @@ async def test_probe_cases_skips_writes_and_flags_foreign_data() -> None:
         ("all", "deny", True),
         ("leaky", "leak", False),
     ]
+
+
+# Whose token is it?
+
+
+def _jwt(claims: dict[str, Any]) -> str:
+    import base64
+
+    def part(value: dict[str, Any]) -> str:
+        return base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")
+
+    return f"{part({'alg': 'none'})}.{part(claims)}.signature"
+
+
+def _patient_claims(**overrides: Any) -> dict[str, Any]:
+    claims: dict[str, Any] = {
+        "sub": "user-9",
+        "https://haste.health/user_id": "user-9",
+        "https://haste.health/user_role": "member",
+        "fhirUser": f"Patient/{PATIENT}",
+        "https://haste.health/access_policies": ["v1"],
+        "client_id": SEED_CLIENT_ID,
+    }
+    claims.update(overrides)
+    return claims
+
+
+def test_token_claims_decode_without_the_signature() -> None:
+    claims = _patient_claims()
+    assert token_claims(_jwt(claims)) == claims
+    assert token_claims("opaque-token") == {}
+    assert token_claims("a.!!!.c") == {}
+
+
+def test_the_patient_member_token_passes() -> None:
+    claims = token_claims(_jwt(_patient_claims()))
+    assert patient_token_problem(claims, user_id="user-9", patient_id=PATIENT) is None
+    text = describe_claims(claims)
+    assert "user=user-9" in text and "role=member" in text and "access_policies=1" in text
+
+
+@pytest.mark.parametrize(
+    ("overrides", "reason"),
+    [
+        (
+            {"sub": "doug", "https://haste.health/user_id": "doug", "fhirUser": None},
+            "reused another Haste session",
+        ),
+        ({"https://haste.health/user_role": "owner"}, "applies access policies only"),
+        ({"https://haste.health/user_role": "admin"}, "applies access policies only"),
+        ({"fhirUser": "Patient/someone-else"}, "not Patient/"),
+        ({"https://haste.health/access_policies": []}, "no access policy"),
+    ],
+)
+def test_a_token_that_skips_or_lacks_the_policy_is_refused(
+    overrides: dict[str, Any], reason: str
+) -> None:
+    claims = _patient_claims(**overrides)
+    problem = patient_token_problem(claims, user_id="user-9", patient_id=PATIENT)
+    assert problem is not None and reason in problem
+    assert patient_token_problem({}, user_id="user-9", patient_id=PATIENT)
+
+
+def test_describe_claims_never_includes_the_token() -> None:
+    token = _jwt(_patient_claims())
+    assert token not in describe_claims(token_claims(token))

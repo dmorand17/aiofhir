@@ -36,14 +36,17 @@ from haste.env import ROOT, start_script
 from haste.login import login_tokens, save_tokens
 from haste.policy_check import (
     client_is_confidential,
+    describe_claims,
     evaluate_cases,
     fetch_policy_allows_search,
     find_appointment,
     find_other_observation,
     format_results,
     gap_count,
+    patient_token_problem,
     policy_cases,
     probe_cases,
+    token_claims,
 )
 from haste.seed import admin_token
 from haste.seeding import READ_POLICY_ID, SEED_CLIENT_ID, AdminTokenError
@@ -79,6 +82,7 @@ async def _main(as_patient: bool) -> int:
         failed |= not confidential
 
         token = await admin_token()
+        print(f"admin token: {describe_claims(token_claims(token))}")
         allow_search = await fetch_policy_allows_search(http, base, token)
         if allow_search is None:
             print(f"FAIL AccessPolicyV2/{READ_POLICY_ID} is missing: run just seed")
@@ -120,6 +124,16 @@ async def _main(as_patient: bool) -> int:
                 _env("CLIENT_SECRET"),
                 scope=PATIENT_USER_SCOPE,
             )
+            claims = token_claims(tokens.access_token)
+            print(f"patient token: {describe_claims(claims)}")
+            problem = patient_token_problem(claims, user_id=user_id, patient_id=patient_id)
+            if problem:
+                print(f"FAIL not the patient user's member token: {problem}.")
+                print(
+                    "No requests were sent. Chrome incognito windows share one session, so use "
+                    "a fresh browser profile for the patient (see haste/README.md)."
+                )
+                return 1
             if os.environ.get("SAVE_TOKENS", "").strip() == "1":
                 save_tokens(USER_TOKENS_PATH, tokens)
                 print(f"Saved the patient user token to {USER_TOKENS_PATH.relative_to(_ROOT)}.")

@@ -31,13 +31,16 @@ from aiofhir.smart.discovery import discover
 from haste.login import load_tokens
 from haste.policy_check import (
     client_is_confidential,
+    describe_claims,
     evaluate_cases,
     fetch_policy_allows_search,
     find_appointment,
     find_other_observation,
     format_results,
+    patient_token_problem,
     policy_cases,
     probe_cases,
+    token_claims,
 )
 from haste.seeding import SEED_CLIENT_ID
 
@@ -105,6 +108,10 @@ async def _probe(path: Path) -> None:
     # SEED_ALLOW_SEARCH set the way the seed ran.
     allow_search = os.environ.get("SEED_ALLOW_SEARCH", "").strip() == "1"
     tokens = load_tokens(path)
+    claims = token_claims(tokens.access_token)
+    if path.name == ".user-tokens.json":
+        problem = patient_token_problem(claims, user_id=_env("SEED_USER_ID"), patient_id=patient_id)
+        assert problem is None, f"{describe_claims(claims)}: {problem}"
     async with httpx.AsyncClient(timeout=30.0) as http:
         results = await probe_cases(
             http,

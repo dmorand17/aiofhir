@@ -26,6 +26,8 @@ gap that returns another patient's data to a real token fails.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -173,6 +175,73 @@ def policy_cases(
         PolicyCase("delete own Observation", "DELETE", "Observation/lab-a1c", False),
     ]
     return cases
+
+
+ROLE_CLAIM = "https://haste.health/user_role"
+USER_ID_CLAIM = "https://haste.health/user_id"
+PATIENT_CLAIM = "https://haste.health/patient"
+POLICIES_CLAIM = "https://haste.health/access_policies"
+
+
+def token_claims(access_token: str) -> Json:
+    """The JWT payload of a Haste access token, unverified. Empty when it is not a JWT.
+
+    Used only to check whose token it is. The token itself is never printed.
+    """
+    parts = access_token.split(".")
+    if len(parts) != 3:
+        return {}
+    try:
+        payload = base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4))
+        claims = json.loads(payload)
+    except (binascii.Error, ValueError):
+        return {}
+    return claims if isinstance(claims, dict) else {}
+
+
+def describe_claims(claims: Mapping[str, Any]) -> str:
+    """Who a token is for, without the token: user, role, fhirUser, patient, client."""
+    policies = claims.get(POLICIES_CLAIM)
+    fields = [
+        f"user={claims.get(USER_ID_CLAIM) or claims.get('sub')}",
+        f"role={claims.get(ROLE_CLAIM)}",
+        f"fhirUser={claims.get('fhirUser')}",
+        f"patient={claims.get(PATIENT_CLAIM)}",
+        f"client={claims.get('client_id')}",
+        f"access_policies={len(policies) if isinstance(policies, list) else 0}",
+    ]
+    return " ".join(fields)
+
+
+def patient_token_problem(
+    claims: Mapping[str, Any], *, user_id: str, patient_id: str
+) -> str | None:
+    """Why a token is not the seed patient user's member token, or None when it is.
+
+    Haste skips access policies for an ``admin`` or ``owner`` role
+    (``access_control.rs``), so probing with such a token proves nothing.
+    """
+    if not claims:
+        return "the access token is not a JWT, so whose it is cannot be checked"
+    subject = claims.get(USER_ID_CLAIM) or claims.get("sub")
+    if subject != user_id:
+        return (
+            f"the token belongs to user {subject}, not the patient user {user_id}: the browser "
+            "most likely reused another Haste session"
+        )
+    role = claims.get(ROLE_CLAIM)
+    if role != "member":
+        return (
+            f"the patient user has role {role!r}; Haste applies access policies only to "
+            "'member'. Change the user's role to member in the Haste admin console"
+        )
+    fhir_user = claims.get("fhirUser")
+    if fhir_user is not None and fhir_user != f"Patient/{patient_id}":
+        return f"the token's fhirUser is {fhir_user}, not Patient/{patient_id}"
+    policies = claims.get(POLICIES_CLAIM)
+    if not isinstance(policies, list) or not policies:
+        return "the token carries no access policy; run just seed, then sign in again"
+    return None
 
 
 def is_type_search(url: str) -> bool:

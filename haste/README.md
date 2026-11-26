@@ -188,33 +188,45 @@ changes the policy, sign in again (delete `haste/.tokens.json` and rerun
 
 Never sign in to the seed as the patient.
 
-### Use a private window for each account
+### Use a fresh browser profile for each account
 
 The scripts open your default browser through Python's `webbrowser`. If that
 browser already has a Haste session, Haste reuses it without asking: the
 callback arrives in under a second and you never see a sign-in page. If that
 session is the patient's, the seed gets a patient token and Haste returns 403
-on the first bundle post.
+on the first bundle post. The reverse is worse: if the "patient" sign-in reuses
+your admin session, the probe runs as you. Haste skips access policies for
+`admin` and `owner`, so it reads everything and looks like a policy leak.
 
-Point `BROWSER` at a private window so each run picks its account. With Chrome
-on macOS:
+**Incognito is not enough.** All Chrome incognito windows share one session
+until every one of them is closed. Use a throwaway profile instead, which
+`$(mktemp -d)` creates fresh for each command:
 
 ```bash
-BROWSER="open -na 'Google Chrome' --args --incognito %s" SAVE_HASTE_TOKEN=1 just seed
+# admin
+BROWSER="open -na 'Google Chrome' --args --user-data-dir=$(mktemp -d) %s" SAVE_HASTE_TOKEN=1 just seed
+# patient (HASTE_TOKEN is now in .env, so only the patient signs in)
+BROWSER="open -na 'Google Chrome' --args --user-data-dir=$(mktemp -d) %s" just check-policy-as-patient
 ```
 
-The same `BROWSER=...` prefix works for `just smoke` and the policy checks.
+Get the admin token first, so that `check-policy-as-patient` opens a browser
+only for the patient. `check-policy-as-patient` decodes the patient token and stops before sending
+anything unless the token is the patient user's own (`SEED_USER_ID`, role
+`member`, `fhirUser` = `Patient/{PATIENT_ID}`, an access policy attached). It
+prints `admin token:` and `patient token:` lines with those claims, never the
+token itself.
 
 ### Whose token is in `.env`?
 
 This prints the token's claims, not the token itself (run from the repo root):
 
 ```bash
-uv run python -c "import base64,json,os;from dotenv import dotenv_values as d;t=d('.env')['HASTE_TOKEN'].split('.')[1];c=json.loads(base64.urlsafe_b64decode(t+'=='));print({k:c.get(k) for k in ('sub','fhirUser','scope','patient')})"
+uv run python -c "import base64,json,os;from dotenv import dotenv_values as d;t=d('.env')['HASTE_TOKEN'].split('.')[1];c=json.loads(base64.urlsafe_b64decode(t+'=='));print({k.rsplit('/',1)[-1]:c.get(k) for k in ('sub','fhirUser','scope','https://haste.health/user_role','https://haste.health/patient')})"
 ```
 
 If `fhirUser` is `Patient/...`, or `patient` is set, it came from a patient
-session. Remove the token and sign in again as the admin.
+session. Remove the token and sign in again as the admin. An admin token shows
+`user_role` `owner` or `admin`; the patient's must be `member`.
 
 ### Errors
 
