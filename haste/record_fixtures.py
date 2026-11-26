@@ -12,16 +12,15 @@ import asyncio
 import json
 import os
 import sys
-from pathlib import Path
 from typing import Any
 
 import httpx
-from dotenv import load_dotenv
 
 from aiofhir.scrub import scrub
+from haste.env import ROOT, start_script
 from haste.login import load_tokens
 
-_ROOT = Path(__file__).resolve().parents[1]
+_ROOT = ROOT
 OUT = _ROOT / "tests" / "fixtures" / "haste"
 EXAMPLE_PATIENT = "example-patient"
 # File name -> (path under the FHIR base, search params). "{patient}" is replaced.
@@ -52,8 +51,7 @@ def deidentify(body: Any, patient_id: str) -> str:
 
 
 async def _main() -> None:
-    load_dotenv(_ROOT / ".env")
-    load_dotenv(_ROOT / "haste" / ".env")
+    start_script()
     base = os.environ.get("BASE", "").strip().rstrip("/")
     path = _ROOT / "haste" / ".tokens.json"
     if not base or not path.exists():

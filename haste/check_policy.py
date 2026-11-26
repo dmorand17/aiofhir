@@ -27,14 +27,12 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from pathlib import Path
 
 import httpx
-from dotenv import load_dotenv
 
-from aiofhir.log import configure_cli_logging
 from aiofhir.profiles import HasteProfile
 from aiofhir.smart.discovery import discover
+from haste.env import ROOT, start_script
 from haste.login import login_tokens, save_tokens
 from haste.policy_check import (
     client_is_confidential,
@@ -46,9 +44,9 @@ from haste.policy_check import (
     probe_cases,
 )
 from haste.seed import admin_token
-from haste.seeding import SEED_CLIENT_ID
+from haste.seeding import SEED_CLIENT_ID, AdminTokenError
 
-_ROOT = Path(__file__).resolve().parents[1]
+_ROOT = ROOT
 USER_TOKENS_PATH = _ROOT / "haste" / ".user-tokens.json"
 PATIENT_USER_SCOPE = "user/*.rs openid fhirUser"
 
@@ -62,9 +60,7 @@ def _env(name: str) -> str:
 
 
 async def _main(as_patient: bool) -> int:
-    load_dotenv(_ROOT / ".env")
-    load_dotenv(_ROOT / "haste" / ".env")
-    configure_cli_logging()
+    start_script()
     base = _env("BASE").rstrip("/")
     patient_id = _env("PATIENT_ID")
     user_id = _env("SEED_USER_ID")
@@ -119,4 +115,8 @@ if __name__ == "__main__":
     flags = sys.argv[1:]
     if flags not in ([], ["--as-patient"]):
         raise SystemExit("usage: python -m haste.check_policy [--as-patient]")
-    raise SystemExit(asyncio.run(_main(as_patient=flags == ["--as-patient"])))
+    try:
+        raise SystemExit(asyncio.run(_main(as_patient=flags == ["--as-patient"])))
+    except AdminTokenError as exc:
+        print(exc, file=sys.stderr)
+        raise SystemExit(1) from exc

@@ -1,8 +1,10 @@
 """Create the aiofhir smoke client and seed appointments on a Haste project.
 
-Reads BASE from the environment, the repo-root .env, or haste/.env. When HASTE_TOKEN
-is missing, signs in with the existing CLIENT_ID and keeps the token in memory.
-Set SAVE_HASTE_TOKEN=1 to also write it to .env (mode 600).
+Reads BASE from the environment or the repo-root .env, the only .env it loads
+(a leftover haste/.env is ignored, with a warning). When HASTE_TOKEN is missing,
+signs in with the existing CLIENT_ID and keeps the token in memory.
+Set SAVE_HASTE_TOKEN=1 to also write it to .env (mode 600). If Haste answers 401,
+the saved HASTE_TOKEN has most likely expired: remove it from .env and run again.
 PATIENT_ID is written after the seed patient is created or reused.
 
 The patient login: set SEED_USER_EMAIL to an address you can read (for example
@@ -41,29 +43,28 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from dotenv import load_dotenv
 
-from aiofhir.log import configure_cli_logging
 from aiofhir.profiles import HasteProfile
 from aiofhir.scrub import scrub
 from aiofhir.smart.discovery import discover
+from haste.env import ROOT, load_env, start_script
 from haste.login import SEED_LOGIN_SCOPE, login_access_token, save_env_value
 from haste.seeding import (
     CLIENT_ID,
     SEED_CLIENT_ID,
+    AdminTokenError,
     SeedUserError,
     apply_seed,
     delete_seed_client,
     secure_seed_client,
 )
 
-_ROOT = Path(__file__).resolve().parents[1]
+_ROOT = ROOT
 logger = logging.getLogger("haste.seed")
 
 
 def _env(name: str) -> str:
-    load_dotenv(_ROOT / ".env")
-    load_dotenv(_ROOT / "haste" / ".env")
+    load_env()
     value = os.environ.get(name, "").strip()
     if not value:
         print(f"Set {name}.", file=sys.stderr)
@@ -90,8 +91,7 @@ def _optional_bundle(directory: str, prefix: str) -> dict[str, Any] | None:
 
 async def admin_token() -> str:
     """The admin token: HASTE_TOKEN, or a browser sign-in with CLIENT_ID."""
-    load_dotenv(_ROOT / ".env")
-    load_dotenv(_ROOT / "haste" / ".env")
+    load_env()
     token = os.environ.get("HASTE_TOKEN", "").strip()
     if token:
         return token
@@ -152,7 +152,7 @@ async def _lock_seed_client(http: httpx.AsyncClient, base: str, token: str) -> s
 
 
 async def _cleanup_client() -> None:
-    configure_cli_logging()
+    start_script()
     base = _env("BASE")
     token = await admin_token()
     async with httpx.AsyncClient(timeout=30.0) as http:
@@ -167,7 +167,7 @@ async def _cleanup_client() -> None:
 
 
 async def _main() -> None:
-    configure_cli_logging()
+    start_script()
     base = _env("BASE")
     token = await admin_token()
     synthea = os.environ.get("SYNTHEA_DIR", "").strip()
@@ -213,10 +213,15 @@ async def _main() -> None:
     print(scrub("\n".join(lines)))
 
 
-if __name__ == "__main__":
-    if sys.argv[1:] == ["--cleanup-client"]:
-        asyncio.run(_cleanup_client())
-    elif sys.argv[1:]:
+def main(argv: list[str]) -> None:
+    if argv not in ([], ["--cleanup-client"]):
         raise SystemExit("usage: python -m haste.seed [--cleanup-client]")
-    else:
-        asyncio.run(_main())
+    try:
+        asyncio.run(_cleanup_client() if argv else _main())
+    except AdminTokenError as exc:
+        print(exc, file=sys.stderr)
+        raise SystemExit(1) from exc
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

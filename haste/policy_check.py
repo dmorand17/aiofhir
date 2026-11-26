@@ -24,7 +24,13 @@ from typing import Any
 
 import httpx
 
-from haste.seeding import CLIENT_ID, READ_POLICY_ID, REDIRECT_URI, SEED_SYSTEM
+from haste.seeding import (
+    CLIENT_ID,
+    READ_POLICY_ID,
+    REDIRECT_URI,
+    SEED_SYSTEM,
+    raise_if_token_rejected,
+)
 
 # An id no seed writes. The policy decides on the id alone, so it need not exist.
 OTHER_PATIENT = "aiofhir-not-the-seed-patient"
@@ -171,6 +177,7 @@ async def evaluate_case(
         json=evaluate_parameters(user_id, case),
         headers=_headers(admin_token),
     )
+    raise_if_token_rejected(response, "evaluate the policy")
     text = response.text
     if response.status_code < 400 and APPROVED in text:
         return CaseResult(case, "allow")
@@ -264,6 +271,7 @@ async def find_other_observation(
         params={"_count": "20"},
         headers=_headers(admin_token),
     )
+    raise_if_token_rejected(response, "search Observation")
     if response.status_code >= 400:
         return None
     for resource in _resources(response):
@@ -283,6 +291,7 @@ async def find_appointment(
         params={"patient": patient_id, "_count": "1"},
         headers=_headers(admin_token),
     )
+    raise_if_token_rejected(response, "search Appointment")
     if response.status_code >= 400:
         return None
     for resource in _resources(response):

@@ -13,7 +13,7 @@ with `just seed` and `just smoke`, or `uv run python -m haste.seed` and
 | `policy_model.py` | Offline model of Haste's rule engine, used by `tests/haste/test_policy.py` |
 | `bundles/` | Hand-posted transactions: the admin seed client, and a seed cleanup |
 | `synthea-data/` | Practitioner and hospital bundles the seed loads (`SYNTHEA_DIR`) |
-| `.env.example` | Variables the scripts read from the repo-root `.env` or `haste/.env`. The seed writes new values to the root `.env`. |
+| `.env.example` | Variables the scripts read. Copy it to the repo-root `.env`, the only `.env` they load; the seed writes new values there too. A leftover `haste/.env` is ignored, with a warning. |
 
 Unit tests are in `tests/haste/`. The opt-in live check is `tests/live/test_haste.py`.
 

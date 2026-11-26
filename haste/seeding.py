@@ -57,6 +57,25 @@ class SeedUserError(RuntimeError):
     """The seed could not find or invite the patient User."""
 
 
+class AdminTokenError(RuntimeError):
+    """Haste rejected the admin token (HTTP 401)."""
+
+
+ADMIN_TOKEN_REJECTED = (
+    "Haste rejected the admin token (401) while trying to {action}. It is most likely an "
+    "expired HASTE_TOKEN in the repo-root .env: remove that line and run again to sign in."
+)
+
+
+def raise_if_token_rejected(response: httpx.Response, action: str) -> None:
+    """Turn a 401 on an admin-token request into a message that says what to do.
+
+    The message never includes the token.
+    """
+    if response.status_code == 401:
+        raise AdminTokenError(ADMIN_TOKEN_REJECTED.format(action=action))
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -556,6 +575,7 @@ async def _ensure_patient(http: httpx.AsyncClient, base: str, token: str) -> str
         json=build_patient(),
         headers=_headers(token),
     )
+    raise_if_token_rejected(response, "create the seed Patient")
     if response.status_code >= 400:
         raise RuntimeError(f"patient create failed ({response.status_code})")
     body = response.json()
@@ -601,6 +621,7 @@ async def _ensure_membership(
             json=membership,
             headers=_headers(token),
         )
+    raise_if_token_rejected(response, "write the Membership")
     if response.status_code >= 400:
         raise RuntimeError(f"membership write failed ({response.status_code})")
     if found and found.get("id"):
@@ -635,6 +656,7 @@ async def _ensure_assignment(
         json=build_policy_assignment(membership_id),
         headers=_headers(token),
     )
+    raise_if_token_rejected(response, "assign the read policy")
     if response.status_code >= 400:
         raise RuntimeError(f"policy assignment failed ({response.status_code})")
     return True
@@ -642,6 +664,7 @@ async def _ensure_assignment(
 
 async def _put(http: httpx.AsyncClient, url: str, token: str, resource: Json) -> None:
     response = await http.put(url, json=resource, headers=_headers(token))
+    raise_if_token_rejected(response, f"write {resource['resourceType']}")
     if response.status_code >= 400:
         raise RuntimeError(f"{resource['resourceType']} write failed ({response.status_code})")
 
@@ -697,6 +720,7 @@ async def secure_seed_client(
     """
     url = f"{base.rstrip('/')}/ClientApplication/{client_id}"
     response = await http.get(url, headers=_headers(token))
+    raise_if_token_rejected(response, "look up the seed client")
     if response.status_code == 404:
         return "absent"
     if response.status_code >= 400:
@@ -716,6 +740,7 @@ async def secure_seed_client(
     locked["grantType"] = ["authorization_code"]
     locked["secret"] = new_secret
     written = await http.put(url, json=locked, headers=_headers(token))
+    raise_if_token_rejected(written, "lock the seed client")
     if written.status_code >= 400:
         raise RuntimeError(
             f"seed client lock failed ({written.status_code}); the new secret is in .env "
@@ -735,6 +760,7 @@ async def delete_seed_client(
     response = await http.delete(
         f"{base.rstrip('/')}/ClientApplication/{client_id}", headers=_headers(token)
     )
+    raise_if_token_rejected(response, "delete the seed client")
     if response.status_code == 404:
         return False
     if response.status_code >= 400:
@@ -750,6 +776,7 @@ async def _ensure_client(
     secret: str,
 ) -> str | None:
     response = await http.get(f"{base}/ClientApplication/{CLIENT_ID}", headers=_headers(token))
+    raise_if_token_rejected(response, "look up the smoke client")
     if response.status_code == 200:
         return None
     if response.status_code != 404:
@@ -760,6 +787,7 @@ async def _ensure_client(
         json=application,
         headers=_headers(token),
     )
+    raise_if_token_rejected(created, "create the smoke client")
     if created.status_code >= 400:
         raise RuntimeError(f"client create failed ({created.status_code})")
     return secret
@@ -794,6 +822,7 @@ async def _ensure_appointments(
             json=appointment,
             headers=_headers(token),
         )
+        raise_if_token_rejected(response, "create an appointment")
         if response.status_code >= 400:
             raise RuntimeError(f"appointment create failed ({response.status_code})")
         created += 1
@@ -813,6 +842,7 @@ async def _first(
         headers=_headers(token),
     )
     logger.debug("GET %s status=%s", resource_type, response.status_code)
+    raise_if_token_rejected(response, f"search {resource_type}")
     if response.status_code >= 400:
         raise RuntimeError(f"{resource_type} search failed ({response.status_code})")
     return _first_entry(response)
@@ -831,6 +861,7 @@ async def _total(
         params=query,
         headers=_headers(token),
     )
+    raise_if_token_rejected(response, f"search {resource_type}")
     if response.status_code >= 400:
         raise RuntimeError(f"{resource_type} search failed ({response.status_code})")
     body = response.json()
@@ -847,6 +878,7 @@ async def _post_bundle(
     logger.info("posting bundle (%s entries)", len(bundle.get("entry") or []))
     response = await http.post(base, json=dict(bundle), headers=_headers(token))
     logger.debug("POST bundle status=%s", response.status_code)
+    raise_if_token_rejected(response, "post a bundle")
     if response.status_code >= 400:
         raise RuntimeError(f"bundle post failed ({response.status_code})")
     body = response.json()

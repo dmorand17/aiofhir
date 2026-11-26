@@ -19,22 +19,14 @@ import asyncio
 import os
 import sys
 import webbrowser
-from pathlib import Path
 
-from dotenv import load_dotenv
-
-from aiofhir.log import configure_cli_logging
 from aiofhir.smart import TokenSet
+from haste.env import ROOT, start_script
 from haste.login import authorization, capture_callback, run_smoke, save_tokens, wait_for_code
 from haste.seeding import CLIENT_ID as SMOKE_CLIENT_ID
 
-_ROOT = Path(__file__).resolve().parents[1]
+_ROOT = ROOT
 TOKENS_PATH = _ROOT / "haste" / ".tokens.json"
-
-
-def _load() -> None:
-    load_dotenv(_ROOT / ".env")
-    load_dotenv(_ROOT / "haste" / ".env")
 
 
 def _env(name: str) -> str:
@@ -46,8 +38,7 @@ def _env(name: str) -> str:
 
 
 async def _main() -> None:
-    _load()
-    configure_cli_logging()
+    start_script()
     base = _env("BASE")
     client_id = os.environ.get("SMOKE_CLIENT_ID", "").strip() or SMOKE_CLIENT_ID
     client_secret = os.environ.get("SMOKE_CLIENT_SECRET", "").strip() or None
