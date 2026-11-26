@@ -1,20 +1,27 @@
 [project]
 name = "aiofhir"
-version = "0.0.0"
+version = "0.1.0"
 description = "Async FHIR R4 and SMART on FHIR client"
+readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Doug Morand" }]
 dependencies = ["httpx>=0.27"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Typing :: Typed",
 ]
+
+[project.urls]
+Homepage = "https://github.com/dmorand17/aiofhir"
+Documentation = "https://github.com/dmorand17/aiofhir/tree/main/docs"
+Changelog = "https://github.com/dmorand17/aiofhir/blob/main/CHANGELOG.md"
+Issues = "https://github.com/dmorand17/aiofhir/issues"
 
 [project.optional-dependencies]
 # Reference backend for RemoteRecord. Never imported by `import aiofhir`.
@@ -39,6 +46,10 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/aiofhir"]
+
+# The sdist is the library and its docs; plans, reviews and Haste tooling stay in the repo.
+[tool.hatch.build.targets.sdist]
+include = ["/src/aiofhir", "/docs", "/README.md", "/CHANGELOG.md", "/LICENSE", "/pyproject.toml"]
 
 [build-system]
 requires = ["hatchling"]

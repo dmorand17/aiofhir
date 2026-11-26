@@ -25,3 +25,11 @@ assert loaded("jwt") == []
         text=True,
     )
     assert completed.returncode == 0, completed.stderr + completed.stdout
+
+
+def test_version_comes_from_the_package_metadata() -> None:
+    from importlib.metadata import version
+
+    import aiofhir
+
+    assert aiofhir.__version__ == version("aiofhir") == "0.1.0"
