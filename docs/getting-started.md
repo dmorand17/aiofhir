@@ -87,3 +87,23 @@ call `aiofhir.log.configure_cli_logging()`, which installs one handler with ISO
 person-identifying search values. `LOG_LEVEL` sets the level (default `INFO`)
 and `LOG_UTC=1` prints UTC times. It also keeps `httpx` at `WARNING`, because
 httpx logs full URLs.
+
+In an application with its own logging setup, add the filter to each handler
+that writes text. It redacts the message, the traceback and `stack_info`:
+
+```python
+import logging
+
+from aiofhir.log import RedactingFilter
+
+handler = logging.StreamHandler()
+handler.addFilter(RedactingFilter())
+logging.getLogger().addHandler(handler)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+```
+
+`FhirError` messages are redacted the same way. The server's raw
+OperationOutcome is on `FhirError.outcome`; it can hold PHI, so do not log it.
+Redaction is best effort (a bare id with no context cannot be recognized), so
+keep treating logs as sensitive.

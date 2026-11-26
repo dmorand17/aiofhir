@@ -81,7 +81,14 @@ for the seed and smoke scripts.
 
 ## 🔒 Security model
 
-- The core library never stores tokens. Tokens never appear in `repr()` or logs.
+- The core library never stores tokens, and tokens never appear in `repr()`.
+- Its own log lines and `FhirError` messages are redacted: tokens, person
+  references and person-identifying search values are replaced. The raw
+  OperationOutcome is on `FhirError.outcome`; it can hold PHI, so do not log it.
+- For your own handlers, add `aiofhir.log.RedactingFilter()` so messages and
+  tracebacks are redacted too, and keep `httpx` at `WARNING` (it logs full URLs).
+  Redaction is best effort: a bare id with no context cannot be recognized, so
+  still treat logs as sensitive.
 - Helpers add `patient=` from the token themselves and refuse a caller-supplied patient.
 - Agents should hold no FHIR tokens at all: use `RemoteRecord` with the
   `aiofhir[server]` backend.

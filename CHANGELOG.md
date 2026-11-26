@@ -23,6 +23,12 @@ change the API.
   `client_assertion` and `password` fields; token values in form bodies, query
   strings and Python dict reprs.
 
+### Changed
+
+- The README security model and the getting-started logging section say what
+  is redacted, how to add `RedactingFilter` to an application's own handlers,
+  and that redaction is best effort.
+
 ### Fixed
 
 - `FhirClient` retries reads and searches (GET and `POST [type]/_search`) after
