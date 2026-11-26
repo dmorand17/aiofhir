@@ -23,6 +23,12 @@ change the API.
   `client_assertion` and `password` fields; token values in form bodies, query
   strings and Python dict reprs.
 
+### Fixed
+
+- `FhirClient` retries reads and searches (GET and `POST [type]/_search`) after
+  a dropped connection or a timeout, twice, with the same backoff and jitter as
+  for 429/502/503/504. Each attempt reaches `on_request`.
+
 ## [0.1.0] - 2026-11-25
 
 The first usable release. Haste Health is verified live; the Epic and Oracle

@@ -26,6 +26,7 @@ Sleep = Callable[[float], Awaitable[None]]
 Uniform = Callable[[float, float], float]
 _RETRYABLE = frozenset({429, 502, 503, 504})
 _MAX_RETRY_WAIT = 30.0
+_MAX_RETRIES = 2
 _OUTSIDE_BASE = "ignored next link outside the FHIR base (cross-origin or another path)"
 _RESOURCE_TYPE = re.compile(r"^[A-Z][A-Za-z]{1,63}$")
 _RESOURCE_ID = re.compile(r"^[A-Za-z0-9\-.]{1,64}$")
@@ -214,6 +215,8 @@ class FhirClient:
         attempt = 0
         safe_url = redact_url(url)
         safe_params = redact_params(params if form is None else form)
+        # Reads and searches change nothing, so a dropped connection or a timeout can be retried.
+        retryable = method == "GET" or (method == "POST" and url.endswith("/_search"))
         while True:
             attempt += 1
             token = await self._provider.get()
@@ -226,10 +229,26 @@ class FhirClient:
                         self._http.request(method, url, params=params, data=form, headers=headers),
                         self._timeout,
                     )
-            except TimeoutError as exc:
+            except (TimeoutError, httpx.TimeoutException) as exc:
                 logger.debug("%s %s timed out", method, safe_url)
                 await self._emit(method, safe_url, safe_params, None, attempt, started, "timeout")
+                if retryable and retries < _MAX_RETRIES:
+                    logger.info("retrying %s %s after a timeout", method, safe_url)
+                    await self._sleep(self._delay(None, retries))
+                    retries += 1
+                    continue
                 raise FhirError(0, "request timed out") from exc
+            except httpx.TransportError as exc:
+                logger.debug("%s %s failed", method, safe_url)
+                await self._emit(
+                    method, safe_url, safe_params, None, attempt, started, "request failed"
+                )
+                if retryable and retries < _MAX_RETRIES:
+                    logger.info("retrying %s %s after %s", method, safe_url, type(exc).__name__)
+                    await self._sleep(self._delay(None, retries))
+                    retries += 1
+                    continue
+                raise FhirError(0, "request failed") from exc
             except httpx.HTTPError as exc:
                 logger.debug("%s %s failed", method, safe_url)
                 await self._emit(
@@ -245,7 +264,7 @@ class FhirClient:
                     await self._provider.refresh(token)
                     continue
                 raise AuthExpired()
-            if response.status_code in _RETRYABLE and retries < 2:
+            if response.status_code in _RETRYABLE and retries < _MAX_RETRIES:
                 logger.info(
                     "retrying %s %s after status %s", method, safe_url, response.status_code
                 )
@@ -276,8 +295,8 @@ class FhirClient:
         if inspect.isawaitable(result):
             await result
 
-    def _delay(self, response: httpx.Response, attempt: int) -> float:
-        header = response.headers.get("Retry-After")
+    def _delay(self, response: httpx.Response | None, attempt: int) -> float:
+        header = response.headers.get("Retry-After") if response is not None else None
         if header is not None and header.strip().isdigit():
             return min(float(header), _MAX_RETRY_WAIT)
         jitter = float(self._uniform(0.5, 1.0))

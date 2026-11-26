@@ -163,5 +163,7 @@ async def test_hooks_see_a_failed_request() -> None:
         ) as fhir:
             with pytest.raises(FhirError):
                 await fhir.read("Observation", "o1")
-    assert len(events) == 1
-    assert events[0].status is None and events[0].error == "request failed"
+    # One attempt and two retries, each reported.
+    assert len(events) == 3
+    assert [event.attempt for event in events] == [1, 2, 3]
+    assert all(event.status is None and event.error == "request failed" for event in events)

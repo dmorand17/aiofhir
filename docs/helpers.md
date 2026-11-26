@@ -78,7 +78,9 @@ FhirClient(fhir_base_url, provider, profile=None, max_concurrency=4, timeout=10.
 | `iter_search(type, params, max_pages=10)` | the same, one resource at a time |
 
 - Retries 429, 502, 503 and 504 twice with backoff and jitter, honoring
-  `Retry-After` up to 30 seconds. On a 401 it refreshes once and retries.
+  `Retry-After` up to 30 seconds. Reads and searches (GET and `POST _search`)
+  are also retried after a dropped connection or a timeout, within the same two
+  retries. On a 401 it refreshes once and retries.
 - Follows `next` links only inside the FHIR base. A profile can page another way
   (Haste uses `_offset`).
 - A search whose GET URL would pass 2,000 characters is sent as a form-encoded
