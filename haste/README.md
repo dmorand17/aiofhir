@@ -72,14 +72,35 @@ on the client asking for `patient/` scopes. It grants only:
 - reads of `Observation`, `Condition`, `MedicationRequest`, `AllergyIntolerance`
   and `Appointment` whose stored `subject`, `patient` or `participant.actor`
   is that Patient;
-- `GET Medication/{id}` (reference data the medication helper resolves);
-- type searches of those five types with one unmodified, unchained
-  `patient={id}` (or `Patient/{id}`) and no `_has`.
+- `GET Medication/{id}` (reference data the medication helper resolves).
 
-Everything else is denied: other patients, searches without the patient,
-system search, every `_history`, compartment URLs, operations, batch and
-transaction, and all writes. Includes are filtered by Haste with the same read
-rules. `just check-policy` verifies it against the server (below).
+Everything else is denied: other patients, every search, every `_history`,
+compartment URLs, operations, batch and transaction, and all writes.
+`just check-policy` verifies it against the server (below).
+
+### Searches: `SEED_ALLOW_SEARCH=1`
+
+Haste's policy engine cannot see search parameters: `%request.parameters` is
+always empty in a policy expression (HasteHealth `fhir-client/src/url.rs`,
+`ParsedParameters::flatten`). A compartment URL and `$everything` don't expose
+the patient id either. So a policy can allow a search *type* or deny it, but it
+can't limit a search to one patient.
+
+The record helpers and `just smoke` need searches. `SEED_ALLOW_SEARCH=1 just seed`
+adds a rule that allows type searches of `Patient` and the five types above,
+whatever the parameters. Then only the token confines them:
+
+- a `patient/` token (`aiofhir-smoke`, the chat bot) is safe. Haste filters
+  every search to the patient's compartment;
+- a `user/` or `system/` token the patient obtains is not. One way to get one is
+  signing in to Haste's built-in `admin-app` client. With such a token, the
+  patient can search other patients' records of those six types. Reads by id
+  stay pinned.
+
+`just check-policy` reads the stored policy and adjusts. The searches it can't
+confine are marked `GAP`, and `check-policy-as-patient` (a `user/*.rs` token)
+reports them as leaks. Keep `SEED_ALLOW_SEARCH` set the same way for
+`AIOFHIR_LIVE=1 just test tests/live`.
 
 If the admin token cannot write the system project, the seed stops with a
 message: set `SYSTEM_TOKEN` to a token for the system project, or invite the
@@ -200,6 +221,7 @@ session. Remove the token and sign in again as the admin.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `Haste rejected the admin token (401)` | `HASTE_TOKEN` in `.env` has expired | Delete the `HASTE_TOKEN` line and run again to sign in |
+| `just smoke` or the live helper tests get 403 on searches | The policy was seeded without searches | `SEED_ALLOW_SEARCH=1 just seed` (read the risk under *Searches*) |
 | `bundle post failed (403)` | Signed in as the wrong account (usually the patient) | Delete `HASTE_TOKEN` and run again in a private window as the admin |
 | `haste/.env is ignored` warning | Leftover from older versions | Move its values to the repo-root `.env`, then delete it |
 
@@ -208,7 +230,7 @@ Delete `HASTE_TOKEN` from `.env` when you are done seeding.
 ### A full live run, in order
 
 ```bash
-SAVE_HASTE_TOKEN=1 just seed                   # admin
+SAVE_HASTE_TOKEN=1 just seed                   # admin; add SEED_ALLOW_SEARCH=1 for smoke
 just check-policy                              # admin; needs PATIENT_ID and SEED_USER_ID
 rm -f haste/.tokens.json && SAVE_TOKENS=1 just smoke   # patient
 SAVE_TOKENS=1 just check-policy-as-patient     # patient

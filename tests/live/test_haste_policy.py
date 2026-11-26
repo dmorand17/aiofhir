@@ -32,6 +32,7 @@ from haste.login import load_tokens
 from haste.policy_check import (
     client_is_confidential,
     evaluate_cases,
+    fetch_policy_allows_search,
     find_appointment,
     find_other_observation,
     format_results,
@@ -82,9 +83,16 @@ async def test_policy_matrix_through_evaluate_policy() -> None:
     patient_id = _env("PATIENT_ID")
     user_id = _env("SEED_USER_ID", skip_hint="set it to the patient User id")
     async with httpx.AsyncClient(timeout=30.0) as http:
+        allow_search = await fetch_policy_allows_search(http, base, token)
+        assert allow_search is not None, "the seed policy is missing; run just seed"
         other = await find_other_observation(http, base, token, patient_id)
         appointment = await find_appointment(http, base, token, patient_id)
-        cases = policy_cases(patient_id, other_observation=other, appointment_id=appointment)
+        cases = policy_cases(
+            patient_id,
+            other_observation=other,
+            appointment_id=appointment,
+            allow_search=allow_search,
+        )
         results = await evaluate_cases(http, base, token, user_id=user_id, cases=cases)
     failed = [result for result in results if not result.passed]
     assert not failed, format_results(failed)
@@ -93,10 +101,17 @@ async def test_policy_matrix_through_evaluate_policy() -> None:
 async def _probe(path: Path) -> None:
     base = _env("BASE")
     patient_id = _env("PATIENT_ID")
+    # Searches allowed or not changes what a denied search looks like: keep
+    # SEED_ALLOW_SEARCH set the way the seed ran.
+    allow_search = os.environ.get("SEED_ALLOW_SEARCH", "").strip() == "1"
     tokens = load_tokens(path)
     async with httpx.AsyncClient(timeout=30.0) as http:
         results = await probe_cases(
-            http, base, tokens.access_token, patient_id=patient_id, cases=policy_cases(patient_id)
+            http,
+            base,
+            tokens.access_token,
+            patient_id=patient_id,
+            cases=policy_cases(patient_id, allow_search=allow_search),
         )
     failed = [result for result in results if not result.passed]
     assert not failed, format_results(failed)

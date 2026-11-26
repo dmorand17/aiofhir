@@ -13,6 +13,15 @@ live tests:
   It needs an admin or owner token, which may name another user.
 * ``probe_cases``: sends the read-only cases for real with a token the patient
   user got with ``user/*.rs``, the widest token they could ask for.
+
+Haste's policy engine cannot see search parameters (see
+``haste.seeding.build_read_policy``), so the expected results depend on how the
+policy was seeded. By default searches are denied. With ``SEED_ALLOW_SEARCH=1``
+they are allowed by type, and the searches the policy cannot tell apart from
+the patient's own (another patient's id, no patient, modifiers, chains) are
+*gaps*: Haste allows them, and only a ``patient/`` scope keeps the results to
+the patient. A gap passes ``$evaluate-policy`` either way and is reported; a
+gap that returns another patient's data to a real token fails.
 """
 
 from __future__ import annotations
@@ -29,7 +38,9 @@ from haste.seeding import (
     READ_POLICY_ID,
     REDIRECT_URI,
     SEED_SYSTEM,
+    policy_allows_search,
     raise_if_token_rejected,
+    searchable_types,
 )
 
 # An id no seed writes. The policy decides on the id alone, so it need not exist.
@@ -46,6 +57,9 @@ class PolicyCase:
     url: str
     allow: bool
     body: Json | None = None
+    # Allowed by the type-level search rule although it is not the patient's own
+    # search: the policy cannot see parameters. Only the token's scope confines it.
+    gap: bool = False
 
     @property
     def read_only(self) -> bool:
@@ -60,6 +74,8 @@ class CaseResult:
 
     @property
     def passed(self) -> bool:
+        if self.case.gap:
+            return self.outcome in ("allow", "deny")
         if self.case.allow:
             return self.outcome == "allow"
         # A request Haste cannot even parse is not granted either. A broken
@@ -74,19 +90,18 @@ def policy_cases(
     other_patient: str = OTHER_PATIENT,
     other_observation: str | None = None,
     appointment_id: str | None = None,
+    allow_search: bool = False,
 ) -> list[PolicyCase]:
-    """What the seed patient may and may not do, as relative FHIR request URLs."""
+    """What the seed patient may and may not do, as relative FHIR request URLs.
+
+    ``allow_search`` matches the seed's ``SEED_ALLOW_SEARCH``: without it the
+    patient's own searches are expected to be denied too; with it, the deny
+    cases that are type searches of a searchable type become gaps.
+    """
     p, o = patient_id, other_patient
-    allow = [
+    reads = [
         ("capabilities", "metadata"),
         ("read own Patient", f"Patient/{p}"),
-        ("search own Patient by _id", f"Patient?_id={p}"),
-        ("labs for own patient", f"Observation?patient={p}&category=laboratory"),
-        ("patient as a reference", f"Observation?patient=Patient/{p}"),
-        ("appointments", f"Appointment?patient={p}&_sort=date&_count=1&_offset=1"),
-        ("medication requests", f"MedicationRequest?patient={p}&status=active"),
-        ("allergies", f"AllergyIntolerance?patient={p}&clinical-status=active"),
-        ("conditions", f"Condition?patient={p}&category=problem-list-item"),
         ("read own Observation", "Observation/lab-a1c"),
         ("read own Condition", "Condition/condition-asthma"),
         ("read own AllergyIntolerance", "AllergyIntolerance/allergy-peanut"),
@@ -94,7 +109,16 @@ def policy_cases(
         ("read a referenced Medication", "Medication/med-remote"),
     ]
     if appointment_id:
-        allow.append(("read own Appointment", f"Appointment/{appointment_id}"))
+        reads.append(("read own Appointment", f"Appointment/{appointment_id}"))
+    searches = [
+        ("search own Patient by _id", f"Patient?_id={p}"),
+        ("labs for own patient", f"Observation?patient={p}&category=laboratory"),
+        ("patient as a reference", f"Observation?patient=Patient/{p}"),
+        ("appointments", f"Appointment?patient={p}&_sort=date&_count=1&_offset=1"),
+        ("medication requests", f"MedicationRequest?patient={p}&status=active"),
+        ("allergies", f"AllergyIntolerance?patient={p}&clinical-status=active"),
+        ("conditions", f"Condition?patient={p}&category=problem-list-item"),
+    ]
     deny = [
         ("read another Patient", f"Patient/{o}"),
         ("search every Patient", "Patient"),
@@ -126,8 +150,12 @@ def policy_cases(
     ]
     if other_observation:
         deny.append(("read another patient's Observation", f"Observation/{other_observation}"))
-    cases = [PolicyCase(label, "GET", url, True) for label, url in allow]
-    cases += [PolicyCase(label, "GET", url, False) for label, url in deny]
+    cases = [PolicyCase(label, "GET", url, True) for label, url in reads]
+    cases += [PolicyCase(label, "GET", url, allow_search) for label, url in searches]
+    cases += [
+        PolicyCase(label, "GET", url, False, gap=allow_search and is_type_search(url))
+        for label, url in deny
+    ]
     cases += [
         PolicyCase(
             "create an Observation",
@@ -145,6 +173,33 @@ def policy_cases(
         PolicyCase("delete own Observation", "DELETE", "Observation/lab-a1c", False),
     ]
     return cases
+
+
+def is_type_search(url: str) -> bool:
+    """Whether a relative URL is a type-level search of a searchable type."""
+    path = url.split("?", 1)[0]
+    return "/" not in path and path in searchable_types()
+
+
+async def fetch_policy_allows_search(
+    http: httpx.AsyncClient, base: str, admin_token: str
+) -> bool | None:
+    """Whether the stored seed policy allows searches; None when it is missing."""
+    response = await http.get(
+        f"{base.rstrip('/')}/AccessPolicyV2/{READ_POLICY_ID}", headers=_headers(admin_token)
+    )
+    raise_if_token_rejected(response, "read the access policy")
+    if response.status_code == 404:
+        return None
+    if response.status_code >= 400:
+        raise RuntimeError(f"access policy read failed ({response.status_code})")
+    body = response.json()
+    return policy_allows_search(body) if isinstance(body, dict) else None
+
+
+def gap_count(results: list[CaseResult]) -> int:
+    """Gap cases Haste allowed: searches only a patient/ scope confines."""
+    return sum(1 for result in results if result.case.gap and result.outcome == "allow")
 
 
 def evaluate_parameters(user_id: str, case: PolicyCase) -> Json:
@@ -304,6 +359,8 @@ def format_results(results: list[CaseResult]) -> str:
     lines = []
     for result in results:
         mark = "ok  " if result.passed else "FAIL"
+        if result.passed and result.case.gap and result.outcome == "allow":
+            mark = "GAP "
         want = "allow" if result.case.allow else "deny"
         detail = f"  ({result.detail})" if result.detail else ""
         lines.append(

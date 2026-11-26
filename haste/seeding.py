@@ -115,13 +115,21 @@ def _one_of(values: tuple[str, ...]) -> str:
     return "(" + " | ".join(f"'{value}'" for value in values) + ")"
 
 
-def build_read_policy(patient_id: str) -> Json:
-    """Read and search the one seed patient's record, and nothing else.
+SEARCH_RULE = "search-by-type"
+
+
+def searchable_types() -> tuple[str, ...]:
+    """The types ``SEED_ALLOW_SEARCH=1`` opens to type-level search."""
+    return ("Patient", *(kind for kinds in COMPARTMENT_TYPES.values() for kind in kinds))
+
+
+def build_read_policy(patient_id: str, *, allow_search: bool = False) -> Json:
+    """Read the one seed patient's record, and nothing else.
 
     Haste evaluates the policy for every request a member makes, whatever the
-    SMART scope of the token (``patient/`` or ``user/``), so the patient is
-    pinned here rather than trusted to the scope. Rules, all under one
-    ``any`` rule (Haste denies the whole policy as soon as a top-level rule
+    SMART scope of the token (``patient/``, ``user/`` or ``system/``), so the
+    patient is pinned here rather than trusted to the scope. Rules, all under
+    one ``any`` rule (Haste denies the whole policy as soon as a top-level rule
     denies):
 
     * ``capabilities``: the CapabilityStatement.
@@ -129,25 +137,35 @@ def build_read_policy(patient_id: str) -> Json:
     * ``read-by-<element>``: ``GET <Type>/{id}`` of a compartment type, when the
       stored resource's ``<element>.reference`` is ``Patient/{id}``.
     * ``read-shared``: ``GET Medication/{id}``.
-    * ``search-patient``: ``GET Patient?_id={id}``.
-    * ``search-compartment``: ``GET <Type>?patient={id}`` of a compartment
-      type, with a single unmodified, unchained ``patient`` value and no
-      ``_has``.
+    * ``search-by-type`` (only with ``allow_search``): ``GET <Type>?...`` for
+      Patient and the compartment types, **whatever the parameters**.
 
-    Everything else falls through and is denied: other patients, searches
-    without the patient, system-level search and history, ``_history``,
-    compartment URLs, operations, batch/transaction and every write.
+    Why searches cannot be pinned: Haste's policy engine cannot see search
+    parameters. ``%request.parameters`` is a ``ParsedParameters`` whose
+    ``flatten()`` is empty, so every path through it (``.patient``, ``._id``)
+    is empty (HasteHealth ``fhir-client/src/url.rs``, unchanged through
+    ``6d3a3ac``). A compartment search (``Patient/{id}/Observation``) and
+    ``$everything`` expose neither the compartment id nor the operation's
+    resource. So a policy can allow a search type or deny it, nothing finer.
+    With ``allow_search`` a search is confined only by the token: a
+    ``patient/`` scope (``aiofhir-smoke``) makes Haste filter it to the
+    patient's compartment, but a ``user/`` or ``system/`` token the patient
+    obtains (for example through Haste's built-in ``admin-app`` client) could
+    search other patients' records of those types.
 
-    Each rule's ``target`` only uses ``%request.type`` and ``%request.level``,
-    which every request has, so a rule only evaluates fields its request
-    shape carries. An evaluation error denies the request.
+    Everything else falls through and is denied: other patients' reads,
+    system search, every ``_history``, compartment URLs, operations,
+    batch/transaction and every write.
+
+    Targets only compare fields every request of the type they name carries,
+    and guard ``resource_type`` with ``exists()``: a system search
+    (``?_type=``) has ``level = 'type'`` but no ``resource_type``, and a
+    target that is empty instead of false is an evaluation error.
     """
     if not _FHIR_ID.match(patient_id):
         raise ValueError("patient id is not a FHIR id")
     own = f"Patient/{patient_id}"
-    compartment = tuple(kind for kinds in COMPARTMENT_TYPES.values() for kind in kinds)
     is_read = "%request.type = 'read'"
-    patient_param = "%request.parameters.patient"
     rules: list[Json] = [
         {
             "name": "capabilities",
@@ -175,57 +193,44 @@ def build_read_policy(patient_id: str) -> Json:
                 "condition": {"expression": _fhirpath(f"'{own}' in %target.{element}.reference")},
             }
         )
-    rules += [
+    rules.append(
         {
             "name": "read-shared",
             "target": {"expression": _fhirpath(is_read)},
             "condition": {
                 "expression": _fhirpath(f"%request.resource_type in {_one_of(SHARED_READ_TYPES)}")
             },
-        },
-        {
-            "name": "search-patient",
-            "target": {
-                "expression": _fhirpath(
-                    "%request.type = 'search' and %request.level = 'type'"
-                    " and %request.resource_type = 'Patient'"
-                )
-            },
-            "condition": {
-                "expression": _fhirpath(
-                    "%request.parameters._id.exists()"
-                    f" and %request.parameters._id.value.all($this = '{patient_id}')"
-                    " and %request.parameters._id.modifier.empty()"
-                    " and %request.parameters._has.empty()"
-                )
-            },
-        },
-        {
-            "name": "search-compartment",
-            "target": {
-                "expression": _fhirpath(
-                    "%request.type = 'search' and %request.level = 'type'"
-                    f" and %request.resource_type in {_one_of(compartment)}"
-                )
-            },
-            "condition": {
-                "expression": _fhirpath(
-                    f"{patient_param}.exists()"
-                    f" and {patient_param}.value.all($this = '{patient_id}' or $this = '{own}')"
-                    f" and {patient_param}.modifier.empty()"
-                    f" and {patient_param}.chains.empty()"
-                    " and %request.parameters._has.empty()"
-                )
-            },
-        },
-    ]
+        }
+    )
+    if allow_search:
+        rules.append(
+            {
+                "name": SEARCH_RULE,
+                "target": {
+                    "expression": _fhirpath(
+                        "%request.type = 'search' and %request.resource_type.exists()"
+                    )
+                },
+                "condition": {
+                    "expression": _fhirpath(
+                        f"%request.resource_type in {_one_of(searchable_types())}"
+                    )
+                },
+            }
+        )
+    scope = (
+        "type-level searches of Patient and its compartment types (confined only by a"
+        " patient/ scope)"
+        if allow_search
+        else "no searches"
+    )
     return {
         "resourceType": "AccessPolicyV2",
         "id": READ_POLICY_ID,
         "name": "aiofhir seed patient read-only",
         "description": (
             f"Read-only access to {own}'s own record: that Patient, its compartment"
-            " resources and referenced Medications. Nothing else."
+            f" resources and referenced Medications by id; {scope}. Nothing else."
         ),
         "engine": "rule-engine",
         "attribute": [
@@ -239,6 +244,17 @@ def build_read_policy(patient_id: str) -> Json:
         ],
         "rule": [{"name": "seed-patient-only", "combineBehavior": "any", "rule": rules}],
     }
+
+
+def policy_allows_search(policy: Mapping[str, Any]) -> bool:
+    """Whether a stored seed policy has the ``search-by-type`` rule."""
+    for top in policy.get("rule") or []:
+        if not isinstance(top, Mapping):
+            continue
+        for rule in top.get("rule") or []:
+            if isinstance(rule, Mapping) and rule.get("name") == SEARCH_RULE:
+                return True
+    return False
 
 
 def build_policy_assignment(membership_id: str) -> Json:
@@ -413,6 +429,7 @@ async def apply_seed(
     system_token: str | None = None,
     sleep: Sleep = asyncio.sleep,
     on_client_secret: Callable[[str], None] | None = None,
+    allow_search: bool = False,
 ) -> SeedResult:
     """Seed the project, then link a patient User when one is named.
 
@@ -448,7 +465,7 @@ async def apply_seed(
             http,
             f"{root}/AccessPolicyV2/{READ_POLICY_ID}",
             token,
-            build_read_policy(used_patient),
+            build_read_policy(used_patient, allow_search=allow_search),
         )
         membership_id = await _ensure_membership(http, root, token, user_id, used_patient)
         linked = True

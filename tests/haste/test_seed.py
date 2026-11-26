@@ -25,6 +25,7 @@ from haste.seeding import (
     build_patient,
     count_resources,
     haste_system_base,
+    policy_allows_search,
 )
 
 WHEN = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
@@ -396,6 +397,16 @@ async def test_seed_invites_the_patient_user_in_the_system_project() -> None:
     policy = json.loads(routes["policy"].calls.last.request.content)
     assert "'Patient/pt-1' in %target.subject.reference" in json.dumps(policy)
     assert result.membership_linked and result.policy_assigned
+
+
+@pytest.mark.parametrize("allow_search", [False, True])
+async def test_seed_writes_searches_into_the_policy_only_when_asked(allow_search: bool) -> None:
+    with respx.mock as mock:
+        routes = _mock_project(mock, [])
+        result = await _seed(seed_user_id="user-9", allow_search=allow_search)
+    policy = json.loads(routes["policy"].calls.last.request.content)
+    assert policy_allows_search(policy) is allow_search
+    assert result.policy_assigned
 
 
 async def test_seed_reuses_an_existing_user_and_uses_the_system_token() -> None:

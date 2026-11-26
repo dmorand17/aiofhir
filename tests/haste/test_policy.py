@@ -18,6 +18,8 @@ from haste.policy_check import (
     client_is_confidential,
     evaluate_case,
     evaluate_parameters,
+    gap_count,
+    is_type_search,
     policy_cases,
     probe_cases,
 )
@@ -30,6 +32,8 @@ from haste.seeding import (
     build_chart,
     build_read_policy,
     delete_seed_client,
+    policy_allows_search,
+    searchable_types,
     secure_seed_client,
 )
 
@@ -56,8 +60,16 @@ def _store(patient_id: str = PATIENT) -> dict[str, dict[str, Any]]:
     return store
 
 
-def _cases() -> list[PolicyCase]:
-    return policy_cases(PATIENT, other_observation="obs-other", appointment_id="appt-1")
+def _cases(*, allow_search: bool = False) -> list[PolicyCase]:
+    return policy_cases(
+        PATIENT,
+        other_observation="obs-other",
+        appointment_id="appt-1",
+        allow_search=allow_search,
+    )
+
+
+MODES = pytest.mark.parametrize("allow_search", [False, True], ids=["no-search", "search"])
 
 
 def _children(policy: dict[str, Any]) -> list[dict[str, Any]]:
@@ -68,8 +80,9 @@ def _children(policy: dict[str, Any]) -> list[dict[str, Any]]:
 # Policy shape
 
 
-def test_policy_is_one_any_rule_of_targeted_leaf_rules() -> None:
-    policy = build_read_policy(PATIENT)
+@MODES
+def test_policy_is_one_any_rule_of_targeted_leaf_rules(allow_search: bool) -> None:
+    policy = build_read_policy(PATIENT, allow_search=allow_search)
     assert policy["id"] == READ_POLICY_ID
     assert policy["engine"] == "rule-engine"
     [top] = policy["rule"]
@@ -88,8 +101,9 @@ def test_policy_is_one_any_rule_of_targeted_leaf_rules() -> None:
             assert target.startswith("%request.type = ")
 
 
-def test_policy_pins_the_patient_and_names_no_write_or_history() -> None:
-    policy = build_read_policy(PATIENT)
+@MODES
+def test_policy_pins_the_patient_and_names_no_write_or_history(allow_search: bool) -> None:
+    policy = build_read_policy(PATIENT, allow_search=allow_search)
     text = json.dumps(policy)
     assert f"Patient/{PATIENT}" in text
     for request_type in (
@@ -97,8 +111,24 @@ def test_policy_pins_the_patient_and_names_no_write_or_history() -> None:
         "batch", "transaction", "invoke", "compartment",
     ):  # fmt: skip
         assert f"'{request_type}'" not in text
-    assert "%request.level = 'type'" in text
+    # Haste cannot see search parameters, and calls a system search type-level.
+    assert "%request.parameters" not in text
+    assert "%request.level" not in text
     assert "'system'" not in text
+
+
+def test_searches_are_only_in_the_search_mode() -> None:
+    assert not policy_allows_search(build_read_policy(PATIENT))
+    with_search = build_read_policy(PATIENT, allow_search=True)
+    assert policy_allows_search(with_search)
+    [rule] = [r for r in _children(with_search) if r["name"] == "search-by-type"]
+    assert rule["target"]["expression"]["expression"] == (
+        "%request.type = 'search' and %request.resource_type.exists()"
+    )
+    for kind in searchable_types():
+        assert f"'{kind}'" in rule["condition"]["expression"]["expression"]
+    assert "Medication'" not in rule["condition"]["expression"]["expression"]
+    assert not policy_allows_search({"rule": ["not a rule"]})
 
 
 def test_policy_reads_the_target_for_compartment_reads() -> None:
@@ -129,37 +159,127 @@ def test_policy_refuses_a_patient_id_that_is_not_a_fhir_id(bad: str) -> None:
 @pytest.mark.parametrize("case", _cases(), ids=lambda case: case.label)
 def test_policy_grants_exactly_the_listed_cases(case: PolicyCase) -> None:
     policy = build_read_policy(PATIENT)
+    assert not case.gap
     assert decide(policy, case.method, case.url, _store()) is case.allow
 
 
-_GUARDS = [
-    ("search-compartment", " and %request.parameters.patient.modifier.empty()"),
-    ("search-compartment", " and %request.parameters.patient.chains.empty()"),
-    ("search-compartment", " and %request.parameters._has.empty()"),
-    ("search-patient", " and %request.parameters._id.modifier.empty()"),
-    ("search-patient", " and %request.parameters._has.empty()"),
-]
-
-
-@pytest.mark.parametrize(("rule_name", "guard"), _GUARDS)
-def test_every_search_guard_is_needed_by_some_case(rule_name: str, guard: str) -> None:
-    policy = build_read_policy(PATIENT)
-    for rule in _children(policy):
-        if rule["name"] == rule_name:
-            expression = rule["condition"]["expression"]
-            assert guard in expression["expression"]
-            expression["expression"] = expression["expression"].replace(guard, "")
-    flipped = [
-        case.label
-        for case in _cases()
-        if decide(policy, case.method, case.url, _store()) is not case.allow
-    ]
-    if "chains" in guard:
-        # A chain's value is never the patient id, so the value check already
-        # denies it. The guard stays as a second layer.
-        assert flipped == []
+@pytest.mark.parametrize("case", _cases(allow_search=True), ids=lambda case: case.label)
+def test_search_mode_grants_the_listed_cases_and_shows_its_gaps(case: PolicyCase) -> None:
+    """With searches on, every type search of a searchable type is allowed: a gap."""
+    policy = build_read_policy(PATIENT, allow_search=True)
+    decided = decide(policy, case.method, case.url, _store())
+    if case.gap:
+        assert decided, "a gap the model denies means the gap list is wrong"
     else:
-        assert flipped, f"no case needs {guard!r}"
+        assert decided is case.allow
+
+
+def test_search_mode_gaps_are_the_parameter_only_denials() -> None:
+    gaps = {case.label for case in _cases(allow_search=True) if case.gap}
+    assert gaps == {
+        "search every Patient",
+        "search another Patient by _id",
+        "search Patients by name",
+        "search Observations without a patient",
+        "search Observations by code only",
+        "labs for another patient",
+        "labs for two patients",
+        "modified patient parameter",
+        "negated own patient",
+        "negated own Patient _id",
+        "chained patient parameter",
+        "subject instead of patient",
+        "reverse chain on own Patient",
+        "reverse chain on own labs",
+    }
+    assert not any(case.gap for case in _cases())
+    assert is_type_search("Observation?patient=x")
+    assert not is_type_search("Practitioner")
+    assert not is_type_search("Patient/p/Observation")
+    assert not is_type_search("?_type=Patient")
+
+
+def test_the_policy_engine_cannot_see_search_parameters() -> None:
+    """HasteHealth url.rs: ParsedParameters flattens to nothing, so every path is empty."""
+    for expression, want in (
+        ("%request.parameters.exists()", False),
+        ("%request.parameters.patient.exists()", False),
+        ("%request.parameters._id.empty()", True),
+    ):
+        policy = {
+            "rule": [
+                {
+                    "name": "probe",
+                    "condition": {
+                        "expression": {"language": "text/fhirpath", "expression": expression}
+                    },
+                }
+            ]
+        }
+        level = evaluate_policy(
+            policy, parse_request("GET", f"Observation?patient={PATIENT}"), _store()
+        )
+        assert (level == 1) is want, expression
+
+
+def test_the_reflection_matches_haste_for_system_search_history_and_operations() -> None:
+    system = parse_request("GET", "?_type=Patient")
+    assert (system.type, system.level, system.resource_type) == ("search", "type", None)
+    for url in ("_history", "Observation/_history", f"Patient/{PATIENT}/_history"):
+        history = parse_request("GET", url)
+        assert (history.type, history.resource_type, history.id) == ("history", None, None)
+    everything = parse_request("GET", f"Patient/{PATIENT}/$everything")
+    assert (everything.type, everything.resource_type, everything.id) == ("invoke", None, None)
+    compartment = parse_request("GET", f"Patient/{PATIENT}/Observation")
+    assert (compartment.type, compartment.resource_type, compartment.id) == (
+        "compartment",
+        "Observation",
+        None,
+    )
+
+
+def _previous_search_rules() -> list[dict[str, Any]]:
+    """The search rules of the first H1 patch, which failed live on 2026-11-25."""
+    p = PATIENT
+    param = "%request.parameters.patient"
+    kinds = (
+        "('Observation' | 'Condition' | 'MedicationRequest' | 'AllergyIntolerance' | 'Appointment')"
+    )
+
+    def rule(name: str, target: str, condition: str) -> dict[str, Any]:
+        return {
+            "name": name,
+            "target": {"expression": {"language": "text/fhirpath", "expression": target}},
+            "condition": {"expression": {"language": "text/fhirpath", "expression": condition}},
+        }
+
+    return [
+        rule(
+            "search-patient",
+            "%request.type = 'search' and %request.level = 'type'"
+            " and %request.resource_type = 'Patient'",
+            "%request.parameters._id.exists()"
+            f" and %request.parameters._id.value.all($this = '{p}')",
+        ),
+        rule(
+            "search-compartment",
+            "%request.type = 'search' and %request.level = 'type'"
+            f" and %request.resource_type in {kinds}",
+            f"{param}.exists() and {param}.value.all($this = '{p}' or $this = 'Patient/{p}')",
+        ),
+    ]
+
+
+def test_the_model_reproduces_the_live_failure_of_the_previous_rules() -> None:
+    """Doug's live check: own searches denied, and ?_type=Patient a target error."""
+    policy = build_read_policy(PATIENT)
+    policy["rule"][0]["rule"] = [*policy["rule"][0]["rule"], *_previous_search_rules()]
+    store = _store()
+    for case in _cases(allow_search=True):
+        if case.allow and is_type_search(case.url):
+            assert not decide(policy, case.method, case.url, store), case.label
+    with pytest.raises(PolicyError, match="target"):
+        evaluate_policy(policy, parse_request("GET", "?_type=Patient"), store)
 
 
 def test_a_target_check_that_ignores_the_patient_leaks_another_record() -> None:
@@ -174,7 +294,7 @@ def test_another_patients_policy_denies_this_patients_record() -> None:
     policy = build_read_policy("pt-2")
     store = _store()
     for case in _cases():
-        if case.allow and case.url not in ("metadata", "Medication/med-remote"):
+        if case.read_only and case.url not in ("metadata", "Medication/med-remote"):
             assert not decide(policy, case.method, case.url, store), case.label
 
 
@@ -183,10 +303,11 @@ def test_a_compartment_read_of_a_missing_resource_is_denied() -> None:
     assert not decide(policy, "GET", "Observation/does-not-exist", _store())
 
 
-def test_no_case_errors_in_the_model() -> None:
+@MODES
+def test_no_case_errors_in_the_model(allow_search: bool) -> None:
     """Every request evaluates cleanly: a deny is a decision, not a parse accident."""
-    policy = build_read_policy(PATIENT)
-    for case in _cases():
+    policy = build_read_policy(PATIENT, allow_search=allow_search)
+    for case in _cases(allow_search=allow_search):
         evaluate_policy(policy, parse_request(case.method, case.url), _store())
 
 
@@ -412,6 +533,12 @@ def test_a_deny_case_passes_on_deny_or_error_and_an_allow_case_only_on_allow() -
     assert CaseResult(deny, "error").passed
     assert not CaseResult(deny, "allow").passed
     assert not CaseResult(deny, "leak").passed
+    gap = PolicyCase("g", "GET", "Observation", False, gap=True)
+    assert CaseResult(gap, "allow").passed
+    assert CaseResult(gap, "deny").passed
+    assert not CaseResult(gap, "leak").passed
+    assert not CaseResult(gap, "error").passed
+    assert gap_count([CaseResult(gap, "allow"), CaseResult(gap, "deny")]) == 1
 
 
 def test_policy_cases_never_write_for_real() -> None:

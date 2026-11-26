@@ -37,14 +37,16 @@ from haste.login import login_tokens, save_tokens
 from haste.policy_check import (
     client_is_confidential,
     evaluate_cases,
+    fetch_policy_allows_search,
     find_appointment,
     find_other_observation,
     format_results,
+    gap_count,
     policy_cases,
     probe_cases,
 )
 from haste.seed import admin_token
-from haste.seeding import SEED_CLIENT_ID, AdminTokenError
+from haste.seeding import READ_POLICY_ID, SEED_CLIENT_ID, AdminTokenError
 
 _ROOT = ROOT
 USER_TOKENS_PATH = _ROOT / "haste" / ".user-tokens.json"
@@ -77,15 +79,35 @@ async def _main(as_patient: bool) -> int:
         failed |= not confidential
 
         token = await admin_token()
+        allow_search = await fetch_policy_allows_search(http, base, token)
+        if allow_search is None:
+            print(f"FAIL AccessPolicyV2/{READ_POLICY_ID} is missing: run just seed")
+            return 1
+        print(
+            "searches: allowed by type (SEED_ALLOW_SEARCH=1); GAP marks searches only a "
+            "patient/ scope confines"
+            if allow_search
+            else "searches: denied (reads by id only)"
+        )
         other = await find_other_observation(http, base, token, patient_id)
         appointment = await find_appointment(http, base, token, patient_id)
-        cases = policy_cases(patient_id, other_observation=other, appointment_id=appointment)
+        cases = policy_cases(
+            patient_id,
+            other_observation=other,
+            appointment_id=appointment,
+            allow_search=allow_search,
+        )
         if other is None:
             print("note: no other patient's Observation found; that read case is skipped")
         evaluated = await evaluate_cases(http, base, token, user_id=user_id, cases=cases)
         print(f"\n$evaluate-policy as User/{user_id}:")
         print(format_results(evaluated))
         failed |= not all(result.passed for result in evaluated)
+        if gaps := gap_count(evaluated):
+            print(
+                f"note: {gaps} searches are allowed although they are not the patient's own. "
+                "The policy cannot see search parameters; only a patient/ scope confines them."
+            )
 
         if as_patient:
             print(

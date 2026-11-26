@@ -10,8 +10,10 @@ PATIENT_ID is written after the seed patient is created or reused.
 The patient login: set SEED_USER_EMAIL to an address you can read (for example
 you+patient@example.com). The seed finds or invites that tenant User in the
 system project, links its Membership to the seed Patient, and assigns a
-read-only AccessPolicyV2. An invited user must accept the email before signing
-in. If the admin token cannot write the system project, set SYSTEM_TOKEN, or
+read-only AccessPolicyV2: reads by id only. SEED_ALLOW_SEARCH=1 also allows
+type searches, which the policy cannot pin to the patient (see
+haste.seeding.build_read_policy). An invited user must accept the email before
+signing in. If the admin token cannot write the system project, set SYSTEM_TOKEN, or
 invite the user in the admin console and set SEED_USER_ID. SYSTEM_BASE
 overrides the derived /w/{tenant}/system/api/v1/fhir.
 
@@ -70,6 +72,11 @@ def _env(name: str) -> str:
         print(f"Set {name}.", file=sys.stderr)
         raise SystemExit(1)
     return value
+
+
+def _allow_search() -> bool:
+    """SEED_ALLOW_SEARCH=1 opens type searches; see build_read_policy for the risk."""
+    return os.environ.get("SEED_ALLOW_SEARCH", "").strip() == "1"
 
 
 def _optional(name: str) -> str | None:
@@ -190,6 +197,7 @@ async def _main() -> None:
                 system_base=_optional("SYSTEM_BASE"),
                 system_token=_optional("SYSTEM_TOKEN"),
                 on_client_secret=_save_client_secret,
+                allow_search=_allow_search(),
             )
         except SeedUserError as exc:
             print(f"Patient user: {exc}", file=sys.stderr)
@@ -209,6 +217,12 @@ async def _main() -> None:
         lines.append("  accept the invitation email before running the smoke script")
     lines.append("membership: linked" if result.membership_linked else "membership: skipped")
     lines.append(f"read_policy: {'assigned' if result.policy_assigned else 'skipped'}")
+    if result.policy_assigned:
+        lines.append(
+            "  searches: allowed by type (SEED_ALLOW_SEARCH=1; only a patient/ scope confines them)"
+            if _allow_search()
+            else "  searches: denied (reads by id only; SEED_ALLOW_SEARCH=1 allows them by type)"
+        )
     lines.append(f"seed_client: {seed_client}")
     print(scrub("\n".join(lines)))
 

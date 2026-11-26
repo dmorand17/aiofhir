@@ -1,12 +1,20 @@
 """A small model of Haste's AccessPolicyV2 rule engine, for offline policy tests.
 
-It follows haste-access-control and haste-fhirpath at HasteHealth commit
-bf26bf3 (2026-11-24), only as far as the seed policy needs:
+It follows haste-access-control, haste-fhir-client and haste-fhirpath at
+HasteHealth commit 6d3a3ac (2026-11-26; the files involved are unchanged since
+bf26bf3), only as far as the seed policy needs. ``request_reflection.rs``:
 
-* ``%request`` has ``type``, ``level``, ``resource_type``, ``id`` and
-  ``parameters``; a field the request shape lacks is empty. Search
-  parameters are found by name and carry ``value`` (split on commas),
-  ``modifier`` and ``chains``.
+* ``%request`` has ``type``, ``level``, ``resource_type`` and ``id``; a field
+  the request shape lacks is empty.
+* Every search is ``level = 'type'``, a system search (``?_type=``) included,
+  and a system search has no ``resource_type``.
+* ``resource_type`` and ``id`` exist only for create, read, vread, update,
+  patch, delete and type search (and a compartment's inner request). History
+  and operations (``$everything``) have neither.
+* ``%request.parameters`` is always empty. It is a ``ParsedParameters``, whose
+  ``flatten()`` returns nothing, and FHIRPath flattens every field it navigates
+  to (``url.rs``, ``fhirpath/src/lib.rs`` ``Invocation::Identifier``). So a
+  policy cannot see search parameters at all.
 * ``%target`` is the attribute read of ``resource_type/id``; empty when the
   resource does not exist.
 * A rule's target and condition must each give one boolean, otherwise the
@@ -25,11 +33,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import urlsplit
 
 DENY, UNDETERMINED, ALLOW = -1, 0, 1
+_REQUEST_FIELDS = ("type", "level", "resource_type", "id")
 _TOKEN = re.compile(r"\s*(?:('(?:[^'\\]|\\.)*')|(%?\$?[A-Za-z_][A-Za-z0-9_]*)|(\S))")
 
 
@@ -38,61 +47,41 @@ class PolicyError(Exception):
 
 
 @dataclass
-class Parameter:
-    name: str
-    value: list[str]
-    modifier: str | None = None
-    chains: list[str] = field(default_factory=list)
-
-
-@dataclass
 class Request:
     type: str
     level: str
     resource_type: str | None = None
     id: str | None = None
-    parameters: dict[str, Parameter] | None = None
 
 
 def parse_request(method: str, url: str) -> Request:
-    """The FHIRRequest Haste would build for a relative URL."""
-    split = urlsplit(url)
-    parts = [part for part in split.path.split("/") if part]
-    params = _parameters(split.query)
+    """The request reflection Haste would build for a relative URL."""
+    parts = [part for part in urlsplit(url).path.split("/") if part]
     if method == "POST":
         return Request("create", "type", parts[0])
     if method == "DELETE":
         return Request("delete", "instance", parts[0], parts[1])
     if not parts:
-        return Request("search", "system", parameters=params)
+        # A system search: Haste calls every search type-level.
+        return Request("search", "type")
     if parts == ["metadata"]:
         return Request("capabilities", "system")
     if parts[0] == "_history":
         return Request("history", "system")
     if len(parts) == 1:
-        return Request("search", "type", parts[0], parameters=params)
+        return Request("search", "type", parts[0])
     if parts[1] == "_history":
-        return Request("history", "type", parts[0])
+        return Request("history", "type")
     if parts[1].startswith("$"):
-        return Request("invoke", "type", parts[0])
+        return Request("invoke", "type")
     if len(parts) == 2:
         return Request("read", "instance", parts[0], parts[1])
     if parts[2] == "_history":
-        return Request("history", "instance", parts[0], parts[1])
+        return Request("history", "instance")
     if parts[2].startswith("$"):
-        return Request("invoke", "instance", parts[0], parts[1])
-    # Patient/{id}/Observation: Haste wraps the inner search, which has no id.
-    return Request("compartment", "type", parts[2], parameters=params)
-
-
-def _parameters(query: str) -> dict[str, Parameter]:
-    found: dict[str, Parameter] = {}
-    for key, value in parse_qsl(query, keep_blank_values=True):
-        head, *chains = key.split(".")
-        name, _, modifier = head.partition(":")
-        if name not in found:
-            found[name] = Parameter(name, value.split(","), modifier or None, chains)
-    return found
+        return Request("invoke", "instance")
+    # Patient/{id}/Observation: Haste reflects the inner search, which has no id.
+    return Request("compartment", "type", parts[2])
 
 
 def evaluate_policy(
@@ -308,11 +297,8 @@ def _field(values: list[Any], name: str) -> list[Any]:
     found: list[Any] = []
     for value in values:
         if isinstance(value, Request):
-            item = getattr(value, name, None)
-        elif isinstance(value, dict) and all(isinstance(v, Parameter) for v in value.values()):
-            item = value.get(name)
-        elif isinstance(value, Parameter):
-            item = getattr(value, name, None)
+            # `parameters` and anything else the reflection lacks are empty.
+            item = getattr(value, name, None) if name in _REQUEST_FIELDS else None
         elif isinstance(value, Mapping):
             item = value.get(name)
         else:
