@@ -12,6 +12,8 @@ change the API.
 - `FhirError` messages are redacted: server diagnostics often echo patient ids,
   identifiers or names. The raw OperationOutcome is kept on `FhirError.outcome`
   (it can hold PHI; do not log it).
+- `RedactingFilter` also redacts tracebacks (`logger.exception`, `exc_info=True`)
+  and `stack_info`, not only the message.
 
 ## [0.1.0] - 2026-11-25
 

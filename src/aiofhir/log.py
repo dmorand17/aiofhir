@@ -99,7 +99,15 @@ def redact_text(text: str) -> str:
 
 
 class RedactingFilter(logging.Filter):
-    """Rewrites each record's message with :func:`redact_text`."""
+    """Rewrites each record's message, traceback and stack with :func:`redact_text`.
+
+    The traceback is formatted once and stored, redacted, in ``record.exc_text``;
+    ``logging.Formatter`` uses a set ``exc_text`` instead of formatting
+    ``exc_info`` again. ``exc_info`` itself is left for handlers that need the
+    exception object, so attach this filter to every handler that writes text.
+    """
+
+    _formatter = logging.Formatter()
 
     def filter(self, record: logging.LogRecord) -> bool:
         message = record.getMessage()
@@ -107,6 +115,12 @@ class RedactingFilter(logging.Filter):
         if cleaned != message:
             record.msg = cleaned
             record.args = None
+        if record.exc_info and not record.exc_text:
+            record.exc_text = self._formatter.formatException(record.exc_info)
+        if record.exc_text:
+            record.exc_text = redact_text(record.exc_text)
+        if record.stack_info:
+            record.stack_info = redact_text(record.stack_info)
         return True
 
 
