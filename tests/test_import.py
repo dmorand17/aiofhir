@@ -16,6 +16,7 @@ def loaded(name: str) -> list[str]:
 
 assert loaded("livekit") == []
 assert loaded("fastapi") == []
+assert loaded("jwt") == []
 """
     completed = subprocess.run(
         [sys.executable, "-c", script],

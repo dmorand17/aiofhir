@@ -16,9 +16,10 @@ import httpx
 from aiofhir.errors import AuthExpired, StateMismatch, TokenError
 from aiofhir.profiles.base import ServerProfile
 from aiofhir.profiles.generic import GenericProfile
+from aiofhir.smart.assertion import ASSERTION_TYPE, ClientAssertionKey
 from aiofhir.smart.discovery import SmartConfiguration, discover
 from aiofhir.smart.pkce import challenge_s256, make_state, make_verifier
-from aiofhir.smart.scopes import scopes_from_capabilities
+from aiofhir.smart.scopes import scopes_from_capabilities, system_scopes_from_capabilities
 from aiofhir.smart.tokens import TokenSet, fhir_user_from_id_token
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,7 @@ class SmartClient:
         client_secret: str | None = None,
         profile: ServerProfile | None = None,
         clock: Callable[[], datetime] | None = None,
+        private_key: ClientAssertionKey | None = None,
     ) -> None:
         self.base = fhir_base_url.rstrip("/")
         self.client_id = client_id
@@ -51,6 +53,7 @@ class SmartClient:
         self.client_secret = client_secret
         self.profile = profile or GenericProfile()
         self._clock = clock or (lambda: datetime.now(UTC))
+        self.private_key = private_key
 
     async def authorization_request(self) -> AuthorizationRequest:
         configuration = await self._configuration()
@@ -115,6 +118,23 @@ class SmartClient:
             return refreshed
         return _carry_context(previous, refreshed)
 
+    async def client_credentials(self, scope: str | None = None) -> TokenSet:
+        """SMART Backend Services: a token for this client itself, with no patient or user.
+
+        Needs a confidential client (`private_key` or `client_secret`). The scope
+        defaults to the system read scopes the server advertises; pass `scope=`
+        for anything else, such as writes for seeding.
+        """
+        if self.private_key is None and not self.client_secret:
+            raise TokenError("client_credentials needs a confidential client")
+        configuration = await self._configuration()
+        requested = scope if scope is not None else system_scopes_from_capabilities(configuration)
+        logger.info("requesting a client_credentials token for %s", self.client_id)
+        body = await self._token_request(
+            configuration, {"grant_type": "client_credentials", "scope": requested}
+        )
+        return self._token_set(body, requested, require_patient=False)
+
     async def _configuration(self) -> SmartConfiguration:
         async with httpx.AsyncClient() as http:
             return await discover(self.base, self.profile, http)
@@ -126,7 +146,14 @@ class SmartClient:
     ) -> dict[str, Any]:
         data = {"client_id": self.client_id, **fields}
         headers: dict[str, str] = {}
-        if self._use_basic(configuration):
+        if self.private_key is not None:
+            if not _supports(configuration, "private_key_jwt"):
+                raise TokenError("the server does not list private_key_jwt")
+            data["client_assertion_type"] = ASSERTION_TYPE
+            data["client_assertion"] = self.private_key.sign(
+                self.client_id, configuration.token_endpoint, self._clock()
+            )
+        elif self._use_basic(configuration):
             headers["Authorization"] = _basic(self.client_id, self.client_secret or "")
         elif self.client_secret and _supports(configuration, "client_secret_post"):
             data["client_secret"] = self.client_secret

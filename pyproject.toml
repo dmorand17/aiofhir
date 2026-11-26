@@ -23,8 +23,12 @@ server = [
     "fastapi>=0.115",
     "uvicorn>=0.32",
 ]
+# private_key_jwt client authentication (RS384/ES384).
+jwt = [
+    "pyjwt[crypto]>=2.10",
+]
 dev = [
-    "aiofhir[server]",
+    "aiofhir[jwt,server]",
     "mypy>=1.14",
     "pytest>=8.3",
     "pytest-asyncio>=0.25",

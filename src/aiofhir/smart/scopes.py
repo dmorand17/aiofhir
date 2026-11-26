@@ -45,6 +45,21 @@ def scopes_from_capabilities(configuration: SmartConfiguration) -> str:
     return scope
 
 
+def system_scopes_from_capabilities(configuration: SmartConfiguration) -> str:
+    """Read scopes for the client_credentials grant (SMART Backend Services).
+
+    The same permission and resource rules as `scopes_from_capabilities`, in the
+    `system` context, with no launch, identity or refresh scopes.
+    """
+    supported = configuration.scopes_supported
+    permission = _permission(set(configuration.capabilities), supported)
+    scope = " ".join(_resource_scopes("system", permission, supported))
+    if not scope:
+        raise DiscoveryError("SMART configuration lists no system scopes for the read resources")
+    logger.debug("derived system scope %s", scope)
+    return scope
+
+
 def _permission(capabilities: set[str], supported: tuple[str, ...] | None) -> str:
     v2 = "permission-v2" in capabilities
     if v2 and (supported is None or any(scope.endswith(".rs") for scope in supported)):
