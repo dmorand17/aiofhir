@@ -155,3 +155,63 @@ own data. `SAVE_TOKENS=1` keeps that token in `haste/.user-tokens.json`
 Access tokens carry the policy *version* they were issued with. After a seed
 changes the policy, sign in again (delete `haste/.tokens.json` and rerun
 `SAVE_TOKENS=1 just smoke`) before testing.
+
+## Signing in and troubleshooting
+
+### Which account
+
+| Command | Sign in as |
+|---|---|
+| `just seed`, `just seed-cleanup`, `just check-policy` | Your own Haste admin account (a `livekit` tenant admin) |
+| `just smoke`, `just check-policy-as-patient` | The seed patient user (`SEED_USER_EMAIL` / `SEED_USER_ID`) |
+
+Never sign in to the seed as the patient.
+
+### Use a private window for each account
+
+The scripts open your default browser through Python's `webbrowser`. If that
+browser already has a Haste session, Haste reuses it without asking: the
+callback arrives in under a second and you never see a sign-in page. If that
+session is the patient's, the seed gets a patient token and Haste returns 403
+on the first bundle post.
+
+Point `BROWSER` at a private window so each run picks its account. With Chrome
+on macOS:
+
+```bash
+BROWSER="open -na 'Google Chrome' --args --incognito %s" SAVE_HASTE_TOKEN=1 just seed
+```
+
+The same `BROWSER=...` prefix works for `just smoke` and the policy checks.
+
+### Whose token is in `.env`?
+
+This prints the token's claims, not the token itself (run from the repo root):
+
+```bash
+uv run python -c "import base64,json,os;from dotenv import dotenv_values as d;t=d('.env')['HASTE_TOKEN'].split('.')[1];c=json.loads(base64.urlsafe_b64decode(t+'=='));print({k:c.get(k) for k in ('sub','fhirUser','scope','patient')})"
+```
+
+If `fhirUser` is `Patient/...`, or `patient` is set, it came from a patient
+session. Remove the token and sign in again as the admin.
+
+### Errors
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `Haste rejected the admin token (401)` | `HASTE_TOKEN` in `.env` has expired | Delete the `HASTE_TOKEN` line and run again to sign in |
+| `bundle post failed (403)` | Signed in as the wrong account (usually the patient) | Delete `HASTE_TOKEN` and run again in a private window as the admin |
+| `haste/.env is ignored` warning | Leftover from older versions | Move its values to the repo-root `.env`, then delete it |
+
+Delete `HASTE_TOKEN` from `.env` when you are done seeding.
+
+### A full live run, in order
+
+```bash
+SAVE_HASTE_TOKEN=1 just seed                   # admin
+just check-policy                              # admin; needs PATIENT_ID and SEED_USER_ID
+rm -f haste/.tokens.json && SAVE_TOKENS=1 just smoke   # patient
+SAVE_TOKENS=1 just check-policy-as-patient     # patient
+AIOFHIR_LIVE=1 just test tests/live
+rm -f haste/.tokens.json haste/.user-tokens.json   # then remove HASTE_TOKEN from .env
+```
