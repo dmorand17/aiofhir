@@ -4,7 +4,7 @@ default:
 
 # Install the project and dev tools from uv.lock.
 sync:
-    uv sync --locked --extra dev
+    uv sync --locked --all-extras
 
 # Refresh uv.lock.
 lock:

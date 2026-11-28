@@ -28,7 +28,7 @@ jobs:
             echo "Release tag $TAG does not match v$version in pyproject.toml." >&2
             exit 1
           fi
-      - run: uv sync --locked --extra dev
+      - run: uv sync --locked --all-extras
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy

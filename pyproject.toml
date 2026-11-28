@@ -34,8 +34,11 @@ server = [
 jwt = [
     "pyjwt[crypto]>=2.10",
 ]
+
+# Development tools. A dependency group is never published as an extra; uv
+# installs it by default. `uv sync --all-extras` adds jwt and server for the tests.
+[dependency-groups]
 dev = [
-    "aiofhir[jwt,server]",
     "mypy>=1.14",
     "pytest>=8.3",
     "pytest-asyncio>=0.25",

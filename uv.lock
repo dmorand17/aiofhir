@@ -15,18 +15,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-dev = [
-    { name = "cryptography" },
-    { name = "fastapi" },
-    { name = "mypy" },
-    { name = "pyjwt", extra = ["crypto"] },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "python-dotenv" },
-    { name = "respx" },
-    { name = "ruff" },
-    { name = "uvicorn" },
-]
 jwt = [
     { name = "pyjwt", extra = ["crypto"] },
 ]
@@ -36,22 +24,35 @@ server = [
     { name = "uvicorn" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "python-dotenv" },
+    { name = "respx" },
+    { name = "ruff" },
+]
+
 [package.metadata]
 requires-dist = [
-    { name = "aiofhir", extras = ["jwt", "server"], marker = "extra == 'dev'" },
     { name = "cryptography", marker = "extra == 'server'", specifier = ">=43" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.14" },
     { name = "pyjwt", extras = ["crypto"], marker = "extra == 'jwt'", specifier = ">=2.10" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.25" },
-    { name = "python-dotenv", marker = "extra == 'dev'", specifier = ">=1.0" },
-    { name = "respx", marker = "extra == 'dev'", specifier = ">=0.22" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.32" },
 ]
-provides-extras = ["server", "jwt", "dev"]
+provides-extras = ["server", "jwt"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=1.14" },
+    { name = "pytest", specifier = ">=8.3" },
+    { name = "pytest-asyncio", specifier = ">=0.25" },
+    { name = "python-dotenv", specifier = ">=1.0" },
+    { name = "respx", specifier = ">=0.22" },
+    { name = "ruff", specifier = ">=0.8" },
+]
 
 [[package]]
 name = "annotated-doc"
