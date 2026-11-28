@@ -46,6 +46,10 @@ dev = [
     "respx>=0.22",
     "ruff>=0.8",
 ]
+# The Streamlit demo in examples/ (`just demo`). Not installed by default.
+demo = [
+    "streamlit>=1.40",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/aiofhir"]
@@ -81,4 +85,9 @@ mypy_path = "src"
 
 [[tool.mypy.overrides]]
 module = ["respx", "respx.*"]
+ignore_missing_imports = true
+
+# The demo group (examples/streamlit_app.py) is not installed by `just check` or CI.
+[[tool.mypy.overrides]]
+module = ["streamlit", "streamlit.*"]
 ignore_missing_imports = true

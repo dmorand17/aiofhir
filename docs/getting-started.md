@@ -78,6 +78,27 @@ upcoming_appointments
 - «Annual checkup» Sat Nov 28, 2026, 10:07 PM EST (Appointment/a1)
 ```
 
+## Try it in Streamlit
+
+`examples/streamlit_app.py` runs this whole flow in a browser: sign-in, then
+every helper, each shown formatted for a person and as `to_text()` for a model.
+
+```bash
+just demo        # http://localhost:8765, local only
+```
+
+It reads `BASE`, `SMOKE_CLIENT_ID` and `SMOKE_CLIENT_SECRET` from the repo-root
+`.env`, and needs a SMART client whose redirect URIs include
+`http://localhost:8765/callback` (on Haste, `just seed` creates it). Set
+`DEMO_REDIRECT_URI` for another redirect, and `AIOFHIR_PROFILE` to pick a
+profile. Streamlit comes from the `demo` dependency group, which `just demo`
+installs.
+
+The app keeps `state` and the verifier in a server-side store keyed by `state`,
+because the browser returns from sign-in in a new Streamlit session. Tokens stay
+in that session's memory and are never shown. It is a local demo; agents should
+use [server-side token mode](server.md).
+
 ## Logging
 
 The library attaches only a `NullHandler` to the `aiofhir` logger. Scripts can

@@ -7,6 +7,14 @@ change the API.
 
 ## [Unreleased]
 
+### Added
+
+- `examples/streamlit_app.py` (`just demo`): a Streamlit app that signs a patient
+  in, shows their Patient resource and every helper (formatted for a person and
+  as `to_text()` for a model), and tries to open another patient to show aiofhir
+  and the server each refusing. Streamlit comes from a new `demo` dependency
+  group.
+
 ## [0.1.1] - 2026-11-27
 
 A hardening release: fixes from the code reviews of 0.1.0. No API is removed.

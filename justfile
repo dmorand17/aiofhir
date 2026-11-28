@@ -65,3 +65,7 @@ smoke:
 # Run the aiofhir[server] reference backend. See src/aiofhir/server/__main__.py for its env.
 serve:
     uv run python -m aiofhir.server
+
+# Run the Streamlit demo on port 8765, the redirect URI the seeded smoke client allows.
+demo:
+    uv run --group demo streamlit run examples/streamlit_app.py --server.address localhost --server.port 8765 --server.headless true --browser.gatherUsageStats false

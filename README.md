@@ -116,6 +116,7 @@ Run `just` with no arguments to list every recipe.
 | `just lock` | refresh `uv.lock` after changing dependencies |
 | `just serve` | run the `aiofhir[server]` backend; see [server-side token mode](https://github.com/dmorand17/aiofhir/blob/main/docs/server.md) for its environment |
 | `just discover` | print a server's SMART endpoints and the scope aiofhir would request, for `BASE` |
+| `just demo` | a Streamlit app that signs in and shows every helper; see [getting started](https://github.com/dmorand17/aiofhir/blob/main/docs/getting-started.md#try-it-in-streamlit) |
 
 ### Live tests against Haste Health
 
