@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from aiofhir.client import FhirClient
 from aiofhir.errors import AiofhirError, AuthExpired, FhirError
+from aiofhir.log import redact_text
 from aiofhir.profiles.base import ServerProfile
 from aiofhir.record import RECORD_HELPERS, PatientRecord, Record
 from aiofhir.server.store import EncryptedStore
@@ -36,6 +37,8 @@ RECORD_METHODS: dict[str, frozenset[str]] = {
 }
 _MAX_DAYS = 365
 _AUTH_EXPIRED = {"error": "auth_expired"}
+# An OAuth error_description is free text; keep log lines short.
+_MAX_ERROR_TEXT = 200
 
 
 class SubjectBody(BaseModel):
@@ -117,18 +120,29 @@ def create_app(
         return {"authorize_url": request.url}
 
     @app.get("/auth/callback", response_class=HTMLResponse)
-    async def callback(state: str = "", code: str = "", error: str = "") -> HTMLResponse:
+    async def callback(
+        state: str = "", code: str = "", error: str = "", error_description: str = ""
+    ) -> HTMLResponse:
         entry = pending.pop(state, None)  # single use, even when the rest fails
         if entry is None or entry.expires <= monotonic():
+            logger.info("sign-in callback refused: unknown, used or expired state")
             return _page(400, "This sign-in link has expired or was already used.")
-        if error or not code:
+        if error:
+            logger.info(
+                "sign-in refused by the authorization server: %s",
+                _oauth_text(error, error_description),
+            )
+            return _page(400, "Sign-in was not completed.")
+        if not code:
+            logger.info("sign-in callback had no authorization code")
             return _page(400, "Sign-in was not completed.")
         try:
             tokens = await smart.exchange_code(code, entry.verifier)
-        except (AiofhirError, httpx.HTTPError):
-            logger.info("code exchange failed")
+        except (AiofhirError, httpx.HTTPError) as exc:
+            logger.info("code exchange failed: %s: %s", type(exc).__name__, exc)
             return _page(400, "Sign-in could not be completed.")
         if not tokens.patient:
+            logger.info("sign-in did not select a patient record")
             return _page(400, "This sign-in did not select a patient record.")
         store.put(entry.subject, tokens)
         holders.pop(entry.subject, None)
@@ -176,6 +190,12 @@ def _validated_args(args: dict[str, Any], allowed: frozenset[str]) -> dict[str, 
             raise HTTPException(status_code=422, detail=f"days must be 1 to {_MAX_DAYS}")
         validated["days"] = days
     return validated
+
+
+def _oauth_text(error: str, description: str) -> str:
+    """An OAuth error from the callback URL, cut short and redacted for the log."""
+    parts = [value[:_MAX_ERROR_TEXT] for value in (error, description) if value]
+    return redact_text(": ".join(parts))
 
 
 def _page(status: int, message: str) -> HTMLResponse:

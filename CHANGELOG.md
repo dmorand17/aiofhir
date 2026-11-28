@@ -15,6 +15,16 @@ change the API.
   and the server each refusing. Streamlit comes from a new `demo` dependency
   group.
 
+### Changed
+
+- A failed sign-in now says why. `TokenError` names the token endpoint's status,
+  `error` and `error_description` (redacted), and the token endpoint's refusals
+  are logged at INFO, including the `invalid_grant` behind `AuthExpired`.
+- The `aiofhir[server]` callback logs the reason for each failure: an unknown,
+  used or expired state; an error from the authorization server; a missing code;
+  a failed code exchange, with its cause; and a sign-in without a patient. It
+  still logs no tokens, codes, `state` or subjects.
+
 ## [0.1.1] - 2026-11-27
 
 A hardening release: fixes from the code reviews of 0.1.0. No API is removed.

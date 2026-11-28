@@ -194,3 +194,27 @@ async def test_missing_patient_raises_when_launch_patient_was_requested() -> Non
         with pytest.raises(TokenError) as raised:
             await smart.exchange_code("auth-code", "verifier-1")
     assert "access-secret" not in str(raised.value)
+
+
+async def test_a_token_error_names_the_servers_error_and_is_redacted() -> None:
+    with respx.mock:
+        respx.get(f"{BASE}/.well-known/smart-configuration").respond(200, json=_config())
+        respx.post(TOKEN).respond(
+            400,
+            json={
+                "error": "invalid_request",
+                "error_description": "Bad verifier for Patient/pt-secret",
+            },
+        )
+        smart = SmartClient(
+            BASE,
+            client_id="my-app",
+            redirect_uri="http://localhost:8765/callback",
+            scope="launch/patient",
+            clock=lambda: WHEN,
+        )
+        with pytest.raises(TokenError) as raised:
+            await smart.exchange_code("auth-code", "verifier-1")
+    message = str(raised.value)
+    assert "(400)" in message and "invalid_request" in message and "Bad verifier" in message
+    assert "pt-secret" not in message

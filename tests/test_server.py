@@ -332,3 +332,82 @@ def test_serve_logging_silences_httpx_and_access_logs(monkeypatch: pytest.Monkey
     serve.main()
     assert calls["access_log"] is False
     assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING
+
+
+# Why a sign-in failed, in the logs
+
+
+def _callback_log(caplog: pytest.LogCaptureFixture) -> str:
+    return "\n".join(r.getMessage() for r in caplog.records if r.name.startswith("aiofhir"))
+
+
+async def test_a_refused_code_exchange_logs_the_servers_error(
+    backend: httpx.AsyncClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    with respx.mock(assert_all_called=False) as router:
+        _mock_fhir(router)
+        router.post(TOKEN_URL).respond(
+            401, json={"error": "invalid_client", "error_description": "Invalid credentials"}
+        )
+        state = await _sign_in(backend)
+        response = await backend.get("/auth/callback", params={"code": "c1", "state": state})
+    assert response.status_code == 400
+    text = _callback_log(caplog)
+    assert "code exchange failed: TokenError" in text
+    assert "invalid_client" in text and "Invalid credentials" in text
+    assert state not in text and SUBJECT not in text
+
+
+async def test_a_token_without_a_patient_logs_why(
+    backend: httpx.AsyncClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    body = _token_body("access-1", "refresh-1")
+    del body["patient"]
+    with respx.mock(assert_all_called=False) as router:
+        _mock_fhir(router)
+        router.post(TOKEN_URL).respond(200, json=body)
+        state = await _sign_in(backend)
+        await backend.get("/auth/callback", params={"code": "c1", "state": state})
+    assert "did not include a patient" in _callback_log(caplog)
+
+
+async def test_an_unknown_state_is_logged(
+    backend: httpx.AsyncClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    await backend.get("/auth/callback", params={"code": "c1", "state": "made-up"})
+    text = _callback_log(caplog)
+    assert "unknown, used or expired state" in text
+    assert "made-up" not in text
+
+
+async def test_an_authorization_error_is_logged(
+    backend: httpx.AsyncClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    with respx.mock(assert_all_called=False) as router:
+        _mock_fhir(router)
+        state = await _sign_in(backend)
+        await backend.get(
+            "/auth/callback",
+            params={
+                "state": state,
+                "error": "access_denied",
+                "error_description": "The user denied access",
+            },
+        )
+    text = _callback_log(caplog)
+    assert "access_denied" in text and "The user denied access" in text
+
+
+async def test_a_callback_without_a_code_is_logged(
+    backend: httpx.AsyncClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    with respx.mock(assert_all_called=False) as router:
+        _mock_fhir(router)
+        state = await _sign_in(backend)
+        await backend.get("/auth/callback", params={"state": state})
+    assert "no authorization code" in _callback_log(caplog)

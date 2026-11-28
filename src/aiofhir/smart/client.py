@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlencode
 import httpx
 
 from aiofhir.errors import AuthExpired, StateMismatch, TokenError
+from aiofhir.log import redact_text
 from aiofhir.profiles.base import ServerProfile
 from aiofhir.profiles.generic import GenericProfile
 from aiofhir.smart.assertion import ASSERTION_TYPE, ClientAssertionKey
@@ -332,13 +333,33 @@ def _basic(client_id: str, client_secret: str) -> str:
     return "Basic " + base64.b64encode(raw).decode("ascii")
 
 
+# An OAuth error_description is free text from the server; keep log lines short.
+_MAX_ERROR_TEXT = 200
+
+
 def _token_body(response: httpx.Response) -> dict[str, Any]:
     try:
         body = response.json()
     except ValueError:
         body = None
+    detail = _oauth_error(body)
+    if detail:
+        logger.info("token endpoint refused the request (%s): %s", response.status_code, detail)
     if isinstance(body, dict) and body.get("error") == "invalid_grant":
         raise AuthExpired()
     if response.status_code >= 400 or not isinstance(body, dict):
-        raise TokenError("Token request failed")
+        suffix = f" ({response.status_code}): {detail}" if detail else ""
+        raise TokenError(f"Token request failed{suffix}")
     return body
+
+
+def _oauth_error(body: object) -> str:
+    """The OAuth `error` and `error_description`, redacted: servers may echo ids or names."""
+    if not isinstance(body, dict):
+        return ""
+    parts = [
+        value[:_MAX_ERROR_TEXT]
+        for value in (body.get("error"), body.get("error_description"))
+        if isinstance(value, str) and value
+    ]
+    return redact_text(": ".join(parts))
