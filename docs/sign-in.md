@@ -41,13 +41,15 @@ up to the application:
 2. On the callback, call `verify_state(expected=..., received=...)`. It compares
    in constant time and raises `StateMismatch`.
 3. Use each pair once: delete it before or right after the code exchange, and
-   expire unused pairs (the reference backend uses 10 minutes).
-
+   expire unused pairs (for example after 10 minutes).
 
 ## Scopes
 
 By default the scope is derived from the server's SMART `capabilities` and
-`scopes_supported` (see [profiles](profiles.md#scopes)). Pass `scope=` only when
+`scopes_supported`. When `scopes_supported` lists no wildcard scope (such as
+`patient/*.read`), aiofhir reads the server's CapabilityStatement (`/metadata`,
+without a token) and asks for each listed type it can read or search; see
+[profiles](profiles.md#scopes). Pass `scope=` only when
 your app registration allows less than the server advertises.
 
 ## Tokens
@@ -132,5 +134,6 @@ tokens = await smart.client_credentials()  # system read scopes
 tokens = await smart.client_credentials(scope="system/*.cruds")  # anything else
 ```
 
-The default scope is the `system/` read scopes the server advertises. A client
+The default scope is the `system/` read scopes the server advertises: the
+wildcard when listed, otherwise one per CapabilityStatement type. A client
 with neither `client_secret` nor `private_key` raises `TokenError`.

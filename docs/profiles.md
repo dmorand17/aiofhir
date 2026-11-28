@@ -33,8 +33,11 @@ Haste notes, from the live run:
 
 ## Scopes
 
-`scopes_from_capabilities(cfg)` builds the authorize scope from the server's SMART
-configuration, the same way for every server:
+`scopes_from_capabilities(cfg, resources=...)` builds the authorize scope from the
+server's SMART configuration, the same way for every server. `resources` is the
+CapabilityStatement's readable types (`aiofhir.capability.readable_types`);
+`SmartClient` fetches `/metadata` for them only when `scopes_supported` lists no
+wildcard scope.
 
 | Piece | Rule |
 | --- | --- |
@@ -57,4 +60,34 @@ Subclass `ServerProfile` and override what differs:
 - `adapt_search(resource, params)`: rewrite search parameters on the way out.
 - `next_page(params, received)`: parameters for the next page when a response
   has no `next` link, or `None` to stop.
-- `resolve_medication(request, read)`: the medication name of a MedicationRequest.
+
+A profile never lists resource types; those come from the server's
+CapabilityStatement. For example, a server that rejects `_sort` and serves its
+SMART configuration from a second path:
+
+```python
+from collections.abc import Mapping, Sequence
+
+from aiofhir.profiles import GenericProfile
+
+
+class MyServerProfile(GenericProfile):
+    name = "my-server"
+
+    def discovery_paths(self, base: str) -> list[str]:
+        return [*super().discovery_paths(base), f"{base.rstrip('/')}/smart/configuration"]
+
+    def adapt_search(
+        self, resource: str, params: Mapping[str, Sequence[str]]
+    ) -> dict[str, list[str]]:
+        adapted = super().adapt_search(resource, params)
+        adapted.pop("_sort", None)
+        return adapted
+
+
+smart = SmartClient(base, client_id, redirect_uri, profile=MyServerProfile())
+fhir = FhirClient(base, holder, profile=smart.profile)
+```
+
+Discovery results are cached per base URL and profile class, so a new profile
+class does not reuse another profile's cached configuration.

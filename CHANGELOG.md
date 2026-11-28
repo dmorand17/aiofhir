@@ -28,6 +28,9 @@ resource-specific record helpers are gone.
 - `aiofhir.capability`: `readable_types`, `patient_search_types` and
   `fetch_capability_statement` read a server's CapabilityStatement.
 - `PatientRecord.searchable_types()`: the types `search_raw` accepts.
+- Examples: `standalone_launch.py` (command-line sign-in), `saved_session.py`
+  (resume and refresh saved tokens) and `backend_services.py`
+  (`client_credentials`), with `examples/README.md`.
 
 - `AIOFHIR_LOG_LEVEL`: set it to see aiofhir's logs with no logging code. It
   changes only the `aiofhir` logger. Records go to the app's handlers when it has

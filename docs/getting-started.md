@@ -62,7 +62,106 @@ for resource in meds.resources:
 
 `RefreshingToken` refreshes the access token 60 seconds before it expires. The
 types come from the server's CapabilityStatement; see
-[search and the FHIR client](search.md).
+[search and the FHIR client](search.md) for more search recipes.
+
+## Where tokens live
+
+aiofhir never stores tokens: not on disk, not in a cache, not between runs. The
+`TokenSet` from `exchange_code()` lives only in your process until you save it.
+To keep a session across restarts, save it yourself, and save every refreshed
+set too, because servers may rotate the refresh token and the old one stops
+working:
+
+```python
+from aiofhir.smart import RefreshingToken, TokenSet
+
+
+async def save(tokens: TokenSet) -> None:
+    await my_store.put(user_id, encrypt(tokens.to_dict()))  # your storage, encrypted at rest
+
+
+await save(tokens)  # right after exchange_code()
+holder = RefreshingToken(smart, tokens, on_refresh=save)
+
+# Later, in another process:
+tokens = TokenSet.from_dict(decrypt(await my_store.get(user_id)))
+holder = RefreshingToken(smart, tokens, on_refresh=save)
+```
+
+`repr(tokens)` shows only the patient and expiry, and aiofhir's logs and errors
+never include a token. Keep tokens on your server, never in the browser. See
+[`examples/saved_session.py`](../examples/saved_session.py) for a runnable
+version that saves to a file.
+
+## All together
+
+The same flow as one script. A real app splits it in two: steps 2 and 3 run in
+the request that starts sign-in and in the callback handler, with `state` and
+the verifier stored server-side in between.
+
+```python
+import asyncio
+from urllib.parse import parse_qsl, urlsplit
+
+from aiofhir import FhirClient, PatientRecord
+from aiofhir.smart import RefreshingToken, SmartClient, verify_state
+
+BASE = "https://fhir.example.org/r4"
+
+
+async def main() -> None:
+    smart = SmartClient(BASE, client_id="my-app", redirect_uri="http://localhost:8765/callback")
+
+    request = await smart.authorization_request()
+    print("Sign in at:", request.url)
+    callback = input("Paste the URL you were sent back to: ")
+    params = dict(parse_qsl(urlsplit(callback).query))
+
+    verify_state(expected=request.state, received=params["state"])
+    tokens = await smart.exchange_code(params["code"], request.code_verifier)
+
+    async with FhirClient(BASE, RefreshingToken(smart, tokens), profile=smart.profile) as fhir:
+        record = PatientRecord(fhir, patient_id=tokens.patient)
+        for resource in sorted(await record.searchable_types()):
+            result = await record.search_raw(resource)
+            print(f"{resource}: {len(result.resources)}")
+
+
+asyncio.run(main())
+```
+
+Pasting the redirect URL by hand keeps the script short. If nothing listens on
+the redirect URI, the browser shows an error page there, but the URL in the
+address bar still has `code` and `state`. For a version that catches the
+redirect itself, see
+[`examples/standalone_launch.py`](../examples/standalone_launch.py).
+
+## When things fail
+
+Every aiofhir error subclasses `aiofhir.errors.AiofhirError`. The ones an app
+usually handles:
+
+```python
+from aiofhir import AuthExpired
+from aiofhir.errors import FhirError, StateMismatch, TokenError
+
+try:
+    result = await record.search_raw("Observation", {"category": "laboratory"})
+except AuthExpired as exc:
+    ...  # the refresh token is gone or revoked: send the user to sign in again
+except FhirError as exc:
+    print(exc.status, exc)  # the message is redacted; exc.outcome may hold PHI
+except ValueError as exc:
+    ...  # search_raw refused the type or a parameter (see search.md)
+```
+
+| Error | Raised when |
+| --- | --- |
+| `DiscoveryError` | the SMART configuration or CapabilityStatement is missing or unusable, or PKCE S256 is not supported |
+| `StateMismatch` | `verify_state()` got a different `state`: drop the callback |
+| `TokenError` | the token endpoint refused the request; the message says why |
+| `AuthExpired` | the refresh token was refused or is missing; its message is safe to show the user |
+| `FhirError` | a read or search failed after retries; `status` is the HTTP status |
 
 ## Try it in Streamlit
 
@@ -84,6 +183,11 @@ The app keeps `state` and the verifier in a server-side store keyed by `state`,
 because the browser returns from sign-in in a new Streamlit session. Tokens stay
 in that session's memory and are never shown. It is a local demo; in production,
 keep tokens in your backend.
+
+## More examples
+
+[`examples/`](../examples) has runnable scripts: a command-line sign-in, resuming
+a saved session with refresh, SMART Backend Services, and discovery.
 
 ## Logging
 

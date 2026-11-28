@@ -96,13 +96,13 @@ client, delete `ClientApplication/livekit-agent-demo` with an admin token.
 
 ### A second test patient: Walter White
 
-`bundles/create-walter-white.json` adds a second, fictional patient for agent
+`bundles/create-walter-white.json` adds a second, fictional patient for
 testing. It is one transaction, so it applies completely or not at all:
 
 - `Patient/walter-white`.
-- Prescriptions in each shape the helpers resolve: Metformin (inline), Lisinopril
-  (contained) and Atorvastatin (a referenced `Medication`), each with a dose, plus
-  a stopped Amoxicillin that `active_medications` leaves out.
+- Prescriptions in each common shape: Metformin (inline), Lisinopril (contained)
+  and Atorvastatin (a referenced `Medication`), each with a dose, plus a stopped
+  Amoxicillin.
 - Appointments: booked and pending visits on 2026-12-03, 2026-12-15 and
   2027-01-12, a cancelled one and a past one. The dates are fixed, so edit them
   once they pass.

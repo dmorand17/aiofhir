@@ -69,6 +69,7 @@ pip install "aiofhir[jwt] @ git+https://github.com/dmorand17/aiofhir@v0.1.0"
 | [Sign-in and state handling](https://github.com/dmorand17/aiofhir/blob/main/docs/sign-in.md) | Standalone and EHR launch, state and PKCE, tokens and refresh, backend services |
 | [Search and the FHIR client](https://github.com/dmorand17/aiofhir/blob/main/docs/search.md) | Patient-scoped search, the FHIR client, and the CapabilityStatement helpers |
 | [Server profiles](https://github.com/dmorand17/aiofhir/blob/main/docs/profiles.md) | Haste Health, Epic, Oracle Health (Cerner) and generic servers; how scopes are chosen |
+| [Examples](https://github.com/dmorand17/aiofhir/tree/main/examples) | Runnable scripts: command-line sign-in, resuming a saved session, backend services, discovery |
 
 Epic and Oracle Health (Cerner) profiles are not yet verified against their
 sandboxes. Haste Health is verified live; see [`haste/`](https://github.com/dmorand17/aiofhir/tree/main/haste)
@@ -77,6 +78,8 @@ for the seed and smoke scripts.
 ## 🔒 Security model
 
 - The core library never stores tokens, and tokens never appear in `repr()`.
+  Saving the `TokenSet` (and every refreshed one, through `on_refresh`) is the
+  app's job; see [where tokens live](https://github.com/dmorand17/aiofhir/blob/main/docs/getting-started.md#where-tokens-live).
 - Its own log lines and `FhirError` messages are redacted: tokens, person
   references and person-identifying search values are replaced. The raw
   OperationOutcome is on `FhirError.outcome`; it can hold PHI, so do not log it.
