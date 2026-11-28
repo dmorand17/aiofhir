@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Protocol, runtime_checkable
 
 from aiofhir.client import FhirClient, SearchResult
+from aiofhir.errors import FhirError
 from aiofhir.summary import Citation, Item, Summary
 
 _ALLOWED = frozenset(
@@ -134,7 +137,12 @@ class PatientRecord:
                 "_sort": ["date"],
             },
         )
-        kept = [item for item in result.resources if item.get("status") in _UPCOMING]
+        # Servers may ignore the date filter, so check the window here too.
+        kept = [
+            item
+            for item in result.resources
+            if item.get("status") in _UPCOMING and _starts_within(item, now, until)
+        ]
         kept.sort(key=_appointment_start)
         return _summary(
             "upcoming_appointments",
@@ -151,19 +159,33 @@ class PatientRecord:
 
     async def active_medications(self) -> Summary:
         result = await self.search_raw("MedicationRequest", {"status": "active"})
+        active = [r for r in result.resources if r.get("status") == "active"]
+        # Referenced Medications are read concurrently (the client caps concurrency).
+        # One failed read leaves that item without a name instead of failing the summary.
+        names = await asyncio.gather(
+            *(self._fhir.profile.resolve_medication(r, self._fhir.read) for r in active),
+            return_exceptions=True,
+        )
         items: list[Item] = []
-        for resource in result.resources:
-            if resource.get("status") != "active":
-                continue
-            text = await self._fhir.profile.resolve_medication(resource, self._fhir.read)
+        unread: list[str] = []
+        for resource, name in zip(active, names, strict=True):
+            if isinstance(name, FhirError):
+                unread.append(str(_cite("MedicationRequest", resource)))
+                name = ""
+            elif isinstance(name, BaseException):
+                raise name
             items.append(
                 Item(
-                    _with_dosage(text, resource),
+                    _with_dosage(name, resource),
                     _cite("MedicationRequest", resource),
                     at=parse_fhir_datetime(resource.get("authoredOn")),
                 )
             )
-        return _summary("active_medications", items, result)
+        summary = _summary("active_medications", items, result)
+        if not unread:
+            return summary
+        warning = f"could not read the medication for {', '.join(unread)}"
+        return replace(summary, warnings=(*summary.warnings, warning))
 
     async def allergies(self) -> Summary:
         result = await self.search_raw("AllergyIntolerance", {"clinical-status": "active"})
@@ -312,6 +334,16 @@ def _instant(value: datetime) -> str:
 def _cite(resource_type: str, resource: dict[str, Any]) -> Citation:
     identifier = resource.get("id")
     return Citation(resource_type, identifier if isinstance(identifier, str) else "")
+
+
+def _starts_within(resource: dict[str, Any], start: datetime, end: datetime) -> bool:
+    """True when `start` is in [start, end), or missing (the server's filter decides)."""
+    when = parse_fhir_datetime(resource.get("start"))
+    if when is None:
+        return True
+    if not isinstance(when, datetime):
+        when = datetime(when.year, when.month, when.day, tzinfo=UTC)
+    return start <= when < end
 
 
 def _appointment_start(resource: dict[str, Any]) -> str:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,7 +12,11 @@ import httpx
 from aiofhir.errors import DiscoveryError
 from aiofhir.profiles.base import ServerProfile
 
-_cache: dict[str, SmartConfiguration] = {}
+# (base, profile) -> (fetched at, configuration). Entries expire so a server's
+# changed endpoints or capabilities are picked up without a restart.
+_cache: dict[tuple[str, str], tuple[float, SmartConfiguration]] = {}
+_CACHE_TTL = 3600.0
+_monotonic = time.monotonic
 logger = logging.getLogger(__name__)
 
 
@@ -34,11 +39,12 @@ async def discover(
     profile: ServerProfile,
     http: httpx.AsyncClient,
 ) -> SmartConfiguration:
-    key = base.rstrip("/")
+    root = base.rstrip("/")
+    key = (root, type(profile).__qualname__)
     cached = _cache.get(key)
-    if cached is not None:
-        logger.debug("using cached SMART configuration for %s", key)
-        return cached
+    if cached is not None and _monotonic() - cached[0] < _CACHE_TTL:
+        logger.debug("using cached SMART configuration for %s", root)
+        return cached[1]
     last_error: Exception | None = None
     for url in profile.discovery_paths(base):
         logger.debug("GET %s", url)
@@ -61,8 +67,8 @@ async def discover(
         configuration = _parse(body)
         if "S256" not in configuration.code_challenge_methods_supported:
             raise DiscoveryError("SMART configuration does not support S256 PKCE")
-        _cache[key] = configuration
-        logger.info("discovered SMART configuration for %s", key)
+        _cache[key] = (_monotonic(), configuration)
+        logger.info("discovered SMART configuration for %s", root)
         return configuration
     raise DiscoveryError("SMART discovery failed") from last_error
 

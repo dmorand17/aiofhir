@@ -11,7 +11,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import unquote, urljoin, urlsplit
 
 import httpx
 
@@ -94,6 +94,8 @@ class FhirClient:
         self._capabilities: Json | None = None
 
     async def __aenter__(self) -> FhirClient:
+        if self._http is not None:
+            raise RuntimeError("FhirClient is already open")
         self._http = httpx.AsyncClient(timeout=self._timeout)
         return self
 
@@ -161,6 +163,7 @@ class FhirClient:
         pages = 0
         by_link = False
         use_post = query is not None and len(str(httpx.URL(first, params=query))) > _MAX_GET_URL
+        seen: set[tuple[object, object]] = set()
         while url is not None and pages < max_pages:
             if use_post and not by_link:
                 search_url = f"{self._base}/{resource_type}/_search"
@@ -169,6 +172,10 @@ class FhirClient:
                 response = await self._send("GET", url, params=query)
             body = _json_body(response)
             resources, warnings = _bundle_entries(body)
+            resources, repeated = _unseen(resources, seen)
+            if repeated:
+                # Offset paging over changing data can return a record twice.
+                warnings = [*warnings, f"dropped {repeated} resources repeated across pages"]
             pages += 1
             nxt = _next_link(body, url)
             truncated = False
@@ -382,17 +389,29 @@ def check_resource_type(resource_type: str) -> None:
         raise ValueError("not a valid FHIR resource type")
 
 
+def _unseen(resources: list[Json], seen: set[tuple[object, object]]) -> tuple[list[Json], int]:
+    kept: list[Json] = []
+    for resource in resources:
+        key = (resource.get("resourceType"), resource.get("id"))
+        if key[1] is not None and key in seen:
+            continue
+        seen.add(key)
+        kept.append(resource)
+    return kept, len(resources) - len(kept)
+
+
 def _within_base(base: str, url: str) -> bool:
     """Same scheme and host, and a path under the FHIR base.
 
     Multi-tenant servers such as Haste share one host across tenants
     (`/w/{tenant}/{project}/...`), so the origin alone is not enough.
-    Dot segments are rejected so `base/../other` cannot climb out.
+    Dot segments are rejected so `base/../other` cannot climb out, including
+    percent-encoded ones (`%2e%2e`, `..%2f`), which many servers decode.
     """
     left, right = urlsplit(base), urlsplit(url)
     if (left.scheme, left.netloc.lower()) != (right.scheme, right.netloc.lower()):
         return False
-    segments = right.path.split("/")
+    segments = unquote(right.path).split("/")
     if ".." in segments or "." in segments:
         return False
     prefix = left.path.rstrip("/")

@@ -64,6 +64,7 @@ class SmartClient:
         profile: ServerProfile | None = None,
         clock: Callable[[], datetime] | None = None,
         private_key: ClientAssertionKey | None = None,
+        timeout: float = 10.0,
     ) -> None:
         self.base = fhir_base_url.rstrip("/")
         self.client_id = client_id
@@ -74,6 +75,7 @@ class SmartClient:
         self._clock = clock or (lambda: datetime.now(UTC))
         self.private_key = private_key
         self.ehr_launch = False
+        self._timeout = timeout
 
     @classmethod
     def for_ehr_launch(
@@ -201,7 +203,7 @@ class SmartClient:
         return scopes_from_capabilities(configuration, ehr_launch=self.ehr_launch)
 
     async def _configuration(self) -> SmartConfiguration:
-        async with httpx.AsyncClient() as http:
+        async with httpx.AsyncClient(timeout=self._timeout) as http:
             return await discover(self.base, self.profile, http)
 
     async def _token_request(
@@ -222,8 +224,11 @@ class SmartClient:
             headers["Authorization"] = _basic(self.client_id, self.client_secret or "")
         elif self.client_secret and _supports(configuration, "client_secret_post"):
             data["client_secret"] = self.client_secret
-        async with httpx.AsyncClient() as http:
-            response = await http.post(configuration.token_endpoint, data=data, headers=headers)
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as http:
+                response = await http.post(configuration.token_endpoint, data=data, headers=headers)
+        except httpx.HTTPError as exc:
+            raise TokenError("token request failed") from exc
         grant = fields["grant_type"]
         logger.debug("token endpoint status=%s grant=%s", response.status_code, grant)
         return _token_body(response)
