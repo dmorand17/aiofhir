@@ -6,7 +6,9 @@ examples call :func:`configure_cli_logging`, which installs one stream handler
 with an ISO 8601 timestamp and a redaction filter.
 
 Environment:
-- ``LOG_LEVEL``: root level name (default ``INFO``).
+- ``AIOFHIR_LOG_LEVEL``: read on ``import aiofhir``; sets the level of the
+  ``aiofhir`` logger only (see :func:`apply_env_level`).
+- ``LOG_LEVEL``: root level for :func:`configure_logging` (default ``INFO``).
 - ``LOG_UTC=1``: print timestamps in UTC instead of local time.
 
 httpx and httpcore stay at WARNING so a DEBUG run does not print Authorization
@@ -19,6 +21,7 @@ import logging
 import os
 import re
 import sys
+import warnings
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -174,6 +177,49 @@ class IsoFormatter(logging.Formatter):
         if datefmt:
             return moment.strftime(datefmt)
         return moment.isoformat(timespec="milliseconds")
+
+
+ENV_LEVEL = "AIOFHIR_LOG_LEVEL"
+_FALLBACK_NAME = "aiofhir-fallback"
+
+
+class _FallbackHandler(logging.StreamHandler):  # type: ignore[type-arg]
+    """Prints aiofhir records only while the application has no logging of its own.
+
+    It decides on every record, not once: apps usually configure logging after
+    their imports (LiveKit Agents does it in ``cli.run_app``), and from then on
+    their handlers get the records instead, in their format, exactly once.
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if not logging.getLogger().handlers:
+            super().emit(record)
+
+
+def apply_env_level() -> None:
+    """Apply ``AIOFHIR_LOG_LEVEL`` to the ``aiofhir`` logger. Called on import.
+
+    Only the ``aiofhir`` logger changes: never the root logger, other libraries,
+    or the app's handlers. Records reach the app's handlers as usual. While the
+    app has configured no logging, one stderr handler with ISO 8601 timestamps
+    and the redaction filter prints them. Unset, nothing changes.
+    """
+    raw = os.environ.get(ENV_LEVEL, "").strip()
+    if not raw:
+        return
+    level = getattr(logging, raw.upper(), None)
+    if not isinstance(level, int):
+        warnings.warn(f"{ENV_LEVEL}={raw!r} is not a logging level; ignored", stacklevel=2)
+        return
+    logger = logging.getLogger("aiofhir")
+    logger.setLevel(level)
+    if any(handler.get_name() == _FALLBACK_NAME for handler in logger.handlers):
+        return
+    handler = _FallbackHandler()
+    handler.set_name(_FALLBACK_NAME)
+    handler.setFormatter(IsoFormatter(utc=os.environ.get("LOG_UTC", "") == "1"))
+    handler.addFilter(RedactingFilter())
+    logger.addHandler(handler)
 
 
 def configure_logging(level_name: str | None = None, *, utc: bool | None = None) -> None:

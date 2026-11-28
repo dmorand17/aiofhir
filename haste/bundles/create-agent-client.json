@@ -1,0 +1,29 @@
+{
+  "resourceType": "Bundle",
+  "type": "transaction",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "ClientApplication",
+        "id": "livekit-agent-demo",
+        "name": "LiveKit agent demo",
+        "description": "Confidential client for the aiofhir[server] backend behind a LiveKit Agents demo. The agent itself holds no FHIR token.",
+        "grantType": [
+          "authorization_code",
+          "refresh_token"
+        ],
+        "responseTypes": "code",
+        "redirectUri": [
+          "http://localhost:8000/auth/callback",
+          "http://localhost:8765/auth/callback"
+        ],
+        "scope": "patient/*.rs launch/patient openid fhirUser offline_access",
+        "secret": "REPLACE_WITH_A_NEW_SECRET"
+      },
+      "request": {
+        "method": "PUT",
+        "url": "ClientApplication/livekit-agent-demo"
+      }
+    }
+  ]
+}

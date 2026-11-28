@@ -101,8 +101,23 @@ use [server-side token mode](server.md).
 
 ## Logging
 
-The library attaches only a `NullHandler` to the `aiofhir` logger. Scripts can
-call `aiofhir.log.configure_cli_logging()`, which installs one handler with ISO
+Set `AIOFHIR_LOG_LEVEL` (for example `DEBUG`) to see aiofhir's logs without
+writing any logging code. It is read on `import aiofhir` and changes only the
+`aiofhir` logger:
+
+- In an app that configures logging (LiveKit Agents does), aiofhir's records go
+  to the app's handlers, in its format, at that level. Nothing else changes.
+- In a script with no logging set up, aiofhir prints them to stderr itself, with
+  ISO 8601 timestamps and the redaction filter below, until the app configures
+  logging of its own.
+- Unset, the library only has a `NullHandler`: nothing prints.
+
+```bash
+AIOFHIR_LOG_LEVEL=DEBUG python my_agent.py
+```
+
+Scripts can instead
+call `aiofhir.log.configure_cli_logging()`, which installs one root handler with ISO
 8601 timestamps and a redaction filter: bearer tokens, token fields, and
 `Patient/`, `User/` and `Membership/` ids are replaced, and request URLs hide
 person-identifying search values. `LOG_LEVEL` sets the level (default `INFO`)

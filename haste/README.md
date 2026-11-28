@@ -47,6 +47,96 @@ To remove the client entirely, run `just seed-cleanup` (it deletes
 seed again later, post `bundles/create-seed-client.json` once more; the next
 `just seed` locks it again.
 
+### A client for the LiveKit agent demo
+
+An agent app gets its own confidential client, `livekit-agent-demo`, instead of
+reusing `aiofhir-smoke`. The OAuth client is the `aiofhir[server]` backend (the
+agent only calls `RemoteRecord`), so its redirect URI is the backend's
+`/auth/callback`. `bundles/create-agent-client.json` allows
+`http://localhost:8000/auth/callback` (the `just serve` default) and
+`http://localhost:8765/auth/callback` (the backend on `AIOFHIR_PORT=8765`); edit
+the bundle first if your backend runs elsewhere.
+
+The committed bundle holds a placeholder secret. Make a new secret, save it to
+`.env` first, then post the bundle with the secret filled in. This needs an admin
+token in `HASTE_TOKEN` (`SAVE_HASTE_TOKEN=1 just seed` signs in and saves one):
+
+```bash
+set -a; . ./.env; set +a                        # BASE and HASTE_TOKEN
+secret=$(openssl rand -hex 32)
+if [ ${#secret} -ne 64 ]; then
+  echo "No secret was generated; nothing posted." >&2
+else
+  echo "AGENT_CLIENT_SECRET=$secret" >> .env    # saved before the client exists
+  sed "s/REPLACE_WITH_A_NEW_SECRET/$secret/" haste/bundles/create-agent-client.json \
+    | curl -sS -X POST "$BASE" \
+        -H "Authorization: Bearer $HASTE_TOKEN" \
+        -H "Content-Type: application/fhir+json" \
+        --data-binary @-
+fi
+```
+
+The response is a `transaction-response` Bundle; its entry status should be
+`200 OK` or `201 Created`. Then run the backend with this client:
+
+```bash
+set -a; . ./.env; set +a                        # BASE and AGENT_CLIENT_SECRET
+AIOFHIR_FHIR_BASE=$BASE AIOFHIR_PROFILE=haste \
+AIOFHIR_CLIENT_ID=livekit-agent-demo AIOFHIR_CLIENT_SECRET=$AGENT_CLIENT_SECRET \
+AIOFHIR_REDIRECT_URI=http://localhost:8000/auth/callback \
+AIOFHIR_SERVICE_TOKEN=$(openssl rand -hex 32) \
+AIOFHIR_FERNET_KEY=$(uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())") \
+just serve
+```
+
+Sign in as the `member` patient user. The seed patient's read policy is assigned
+to the Membership, so it applies to tokens from this client too, and the helpers
+still need `SEED_ALLOW_SEARCH=1` on the seed (see *Searches* below). To remove the
+client, delete `ClientApplication/livekit-agent-demo` with an admin token.
+
+### A second test patient: Walter White
+
+`bundles/create-walter-white.json` adds a second, fictional patient for agent
+testing. It is one transaction, so it applies completely or not at all:
+
+- `Patient/walter-white`.
+- Prescriptions in each shape the helpers resolve: Metformin (inline), Lisinopril
+  (contained) and Atorvastatin (a referenced `Medication`), each with a dose, plus
+  a stopped Amoxicillin that `active_medications` leaves out.
+- Appointments: booked and pending visits on 2026-12-03, 2026-12-15 and
+  2027-01-12, a cancelled one and a past one. The dates are fixed, so edit them
+  once they pass.
+- `Membership/walter-white-membership`, linking a Haste User to Walter, and the
+  read policy `AccessPolicyV2/walter-white-read` pinned to `Patient/walter-white`,
+  with its assignment. It is a separate policy, so the seed patient's
+  `aiofhir-seed-patient-read` is untouched. It allows searches by type, like
+  `SEED_ALLOW_SEARCH=1` (see *Searches* below for what that trades off).
+
+To use it:
+
+1. In the Haste admin console, invite a **new** User for Walter with the `member`
+   role, and accept the email. Do not reuse a User that already has a Membership
+   in the project, such as the seed patient user.
+2. Post the bundle with that User's id filled in. This needs an admin token in
+   `HASTE_TOKEN`:
+
+   ```bash
+   set -a; . ./.env; set +a                      # BASE and HASTE_TOKEN
+   user_id=<the new User's id>
+   case "$user_id" in
+     "" | *[!A-Za-z0-9.-]*) echo "Set user_id to the User's FHIR id; nothing posted." >&2 ;;
+     *) sed "s/REPLACE_WITH_USER_ID/$user_id/" haste/bundles/create-walter-white.json \
+          | curl -sS -X POST "$BASE" \
+              -H "Authorization: Bearer $HASTE_TOKEN" \
+              -H "Content-Type: application/fhir+json" \
+              --data-binary @- ;;
+   esac
+   ```
+
+3. Sign in as that User through any client: `livekit-agent-demo` behind
+   `just serve`, the Streamlit demo, or `just smoke`. The token's patient is
+   `walter-white`.
+
 ### The patient user
 
 Haste keeps `User` resources in the tenant's `system` project

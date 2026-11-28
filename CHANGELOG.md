@@ -9,6 +9,10 @@ change the API.
 
 ### Added
 
+- `AIOFHIR_LOG_LEVEL`: set it to see aiofhir's logs with no logging code. It
+  changes only the `aiofhir` logger. Records go to the app's handlers when it has
+  any; while it has none, aiofhir prints them to stderr, redacted.
+
 - `examples/streamlit_app.py` (`just demo`): a Streamlit app that signs a patient
   in, shows their Patient resource and every helper (formatted for a person and
   as `to_text()` for a model), and tries to open another patient to show aiofhir

@@ -10,3 +10,5 @@ dist/
 .env
 haste/.tokens.json
 haste/.user-tokens.json
+reviews/
+plans/

@@ -1,0 +1,482 @@
+{
+  "resourceType": "Bundle",
+  "type": "transaction",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "walter-white",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "walter-white"
+          }
+        ],
+        "active": true,
+        "name": [
+          {
+            "use": "official",
+            "family": "White",
+            "given": [
+              "Walter",
+              "Hartwell"
+            ]
+          }
+        ],
+        "gender": "male",
+        "birthDate": "1958-09-07"
+      },
+      "request": {
+        "method": "PUT",
+        "url": "Patient/walter-white"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Medication",
+        "id": "ww-med-atorvastatin",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "ww-med-atorvastatin"
+          }
+        ],
+        "code": {
+          "text": "Atorvastatin 20 mg tablet"
+        }
+      },
+      "request": {
+        "method": "PUT",
+        "url": "Medication/ww-med-atorvastatin"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "ww-mr-metformin",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "ww-mr-metformin"
+          }
+        ],
+        "status": "active",
+        "intent": "order",
+        "subject": {
+          "reference": "Patient/walter-white"
+        },
+        "authoredOn": "2026-09-15",
+        "medicationCodeableConcept": {
+          "text": "Metformin 500 mg tablet"
+        },
+        "dosageInstruction": [
+          {
+            "text": "Take 1 tablet twice daily with meals"
+          }
+        ]
+      },
+      "request": {
+        "method": "PUT",
+        "url": "MedicationRequest/ww-mr-metformin"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "ww-mr-lisinopril",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "ww-mr-lisinopril"
+          }
+        ],
+        "status": "active",
+        "intent": "order",
+        "subject": {
+          "reference": "Patient/walter-white"
+        },
+        "authoredOn": "2026-08-02",
+        "contained": [
+          {
+            "resourceType": "Medication",
+            "id": "lisinopril",
+            "code": {
+              "text": "Lisinopril 10 mg tablet"
+            }
+          }
+        ],
+        "medicationReference": {
+          "reference": "#lisinopril"
+        },
+        "dosageInstruction": [
+          {
+            "text": "Take 1 tablet once daily"
+          }
+        ]
+      },
+      "request": {
+        "method": "PUT",
+        "url": "MedicationRequest/ww-mr-lisinopril"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "ww-mr-atorvastatin",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "ww-mr-atorvastatin"
+          }
+        ],
+        "status": "active",
+        "intent": "order",
+        "subject": {
+          "reference": "Patient/walter-white"
+        },
+        "authoredOn": "2026-10-01",
+        "medicationReference": {
+          "reference": "Medication/ww-med-atorvastatin"
+        },
+        "dosageInstruction": [
+          {
+            "text": "Take 1 tablet at bedtime"
+          }
+        ]
+      },
+      "request": {
+        "method": "PUT",
+        "url": "MedicationRequest/ww-mr-atorvastatin"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "ww-mr-amoxicillin",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "ww-mr-amoxicillin"
+          }
+        ],
+        "status": "stopped",
+        "intent": "order",
+        "subject": {
+          "reference": "Patient/walter-white"
+        },
+        "authoredOn": "2026-06-10",
+        "medicationCodeableConcept": {
+          "text": "Amoxicillin 500 mg capsule"
+        },
+        "dosageInstruction": [
+          {
+            "text": "Take 1 capsule three times daily for 10 days"
+          }
+        ]
+      },
+      "request": {
+        "method": "PUT",
+        "url": "MedicationRequest/ww-mr-amoxicillin"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Appointment",
+        "id": "ww-appt-past",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "ww-appt-past"
+          }
+        ],
+        "status": "fulfilled",
+        "start": "2026-10-20T15:00:00Z",
+        "description": "Annual physical",
+        "participant": [
+          {
+            "actor": {
+              "reference": "Patient/walter-white"
+            },
+            "status": "accepted"
+          }
+        ]
+      },
+      "request": {
+        "method": "PUT",
+        "url": "Appointment/ww-appt-past"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Appointment",
+        "id": "ww-appt-cancelled",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "ww-appt-cancelled"
+          }
+        ],
+        "status": "cancelled",
+        "start": "2026-12-08T16:00:00Z",
+        "description": "Dermatology consult",
+        "participant": [
+          {
+            "actor": {
+              "reference": "Patient/walter-white"
+            },
+            "status": "accepted"
+          }
+        ]
+      },
+      "request": {
+        "method": "PUT",
+        "url": "Appointment/ww-appt-cancelled"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Appointment",
+        "id": "ww-appt-primary",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "ww-appt-primary"
+          }
+        ],
+        "status": "booked",
+        "start": "2026-12-03T14:30:00Z",
+        "description": "Primary care follow-up",
+        "participant": [
+          {
+            "actor": {
+              "reference": "Patient/walter-white"
+            },
+            "status": "accepted"
+          }
+        ]
+      },
+      "request": {
+        "method": "PUT",
+        "url": "Appointment/ww-appt-primary"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Appointment",
+        "id": "ww-appt-labs",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "ww-appt-labs"
+          }
+        ],
+        "status": "pending",
+        "start": "2026-12-15T13:00:00Z",
+        "description": "Fasting lab work",
+        "participant": [
+          {
+            "actor": {
+              "reference": "Patient/walter-white"
+            },
+            "status": "accepted"
+          }
+        ]
+      },
+      "request": {
+        "method": "PUT",
+        "url": "Appointment/ww-appt-labs"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Appointment",
+        "id": "ww-appt-pulm",
+        "identifier": [
+          {
+            "system": "https://aiofhir.dev/seed",
+            "value": "ww-appt-pulm"
+          }
+        ],
+        "status": "booked",
+        "start": "2027-01-12T17:00:00Z",
+        "description": "Pulmonology consult",
+        "participant": [
+          {
+            "actor": {
+              "reference": "Patient/walter-white"
+            },
+            "status": "accepted"
+          }
+        ]
+      },
+      "request": {
+        "method": "PUT",
+        "url": "Appointment/ww-appt-pulm"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "AccessPolicyV2",
+        "id": "walter-white-read",
+        "name": "Walter White read-only",
+        "description": "Read-only access to Patient/walter-white's record, for a test patient user.",
+        "engine": "rule-engine",
+        "attribute": [
+          {
+            "attributeId": "target",
+            "operation": {
+              "type": "read",
+              "path": {
+                "language": "text/fhirpath",
+                "expression": "%request.resource_type + '/' + %request.id"
+              }
+            }
+          }
+        ],
+        "rule": [
+          {
+            "name": "seed-patient-only",
+            "combineBehavior": "any",
+            "rule": [
+              {
+                "name": "capabilities",
+                "condition": {
+                  "expression": {
+                    "language": "text/fhirpath",
+                    "expression": "%request.type = 'capabilities'"
+                  }
+                }
+              },
+              {
+                "name": "read-patient",
+                "target": {
+                  "expression": {
+                    "language": "text/fhirpath",
+                    "expression": "%request.type = 'read'"
+                  }
+                },
+                "condition": {
+                  "expression": {
+                    "language": "text/fhirpath",
+                    "expression": "%request.resource_type = 'Patient' and %request.id = 'walter-white'"
+                  }
+                }
+              },
+              {
+                "name": "read-by-subject",
+                "target": {
+                  "expression": {
+                    "language": "text/fhirpath",
+                    "expression": "%request.type = 'read' and %request.resource_type in ('Observation' | 'Condition' | 'MedicationRequest' | 'Encounter' | 'Procedure' | 'DocumentReference')"
+                  }
+                },
+                "condition": {
+                  "expression": {
+                    "language": "text/fhirpath",
+                    "expression": "'Patient/walter-white' in %target.subject.reference"
+                  }
+                }
+              },
+              {
+                "name": "read-by-patient",
+                "target": {
+                  "expression": {
+                    "language": "text/fhirpath",
+                    "expression": "%request.type = 'read' and %request.resource_type in ('AllergyIntolerance' | 'Immunization')"
+                  }
+                },
+                "condition": {
+                  "expression": {
+                    "language": "text/fhirpath",
+                    "expression": "'Patient/walter-white' in %target.patient.reference"
+                  }
+                }
+              },
+              {
+                "name": "read-by-participant-actor",
+                "target": {
+                  "expression": {
+                    "language": "text/fhirpath",
+                    "expression": "%request.type = 'read' and %request.resource_type in ('Appointment')"
+                  }
+                },
+                "condition": {
+                  "expression": {
+                    "language": "text/fhirpath",
+                    "expression": "'Patient/walter-white' in %target.participant.actor.reference"
+                  }
+                }
+              },
+              {
+                "name": "read-shared",
+                "target": {
+                  "expression": {
+                    "language": "text/fhirpath",
+                    "expression": "%request.type = 'read'"
+                  }
+                },
+                "condition": {
+                  "expression": {
+                    "language": "text/fhirpath",
+                    "expression": "%request.resource_type in ('Medication')"
+                  }
+                }
+              },
+              {
+                "name": "search-by-type",
+                "target": {
+                  "expression": {
+                    "language": "text/fhirpath",
+                    "expression": "%request.type = 'search' and %request.resource_type.exists()"
+                  }
+                },
+                "condition": {
+                  "expression": {
+                    "language": "text/fhirpath",
+                    "expression": "%request.resource_type in ('Patient' | 'Observation' | 'Condition' | 'MedicationRequest' | 'Encounter' | 'Procedure' | 'DocumentReference' | 'AllergyIntolerance' | 'Immunization' | 'Appointment')"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "request": {
+        "method": "PUT",
+        "url": "AccessPolicyV2/walter-white-read"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Membership",
+        "user": {
+          "reference": "User/REPLACE_WITH_USER_ID"
+        },
+        "link": {
+          "reference": "Patient/walter-white"
+        },
+        "id": "walter-white-membership"
+      },
+      "request": {
+        "method": "PUT",
+        "url": "Membership/walter-white-membership"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "AccessPolicyV2Assignment",
+        "accessPolicy": {
+          "reference": "AccessPolicyV2/walter-white-read"
+        },
+        "link": {
+          "reference": "Membership/walter-white-membership"
+        },
+        "id": "walter-white-read-assignment"
+      },
+      "request": {
+        "method": "PUT",
+        "url": "AccessPolicyV2Assignment/walter-white-read-assignment"
+      }
+    }
+  ]
+}
