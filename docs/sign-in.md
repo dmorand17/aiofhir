@@ -14,6 +14,7 @@ smart = SmartClient(
     client_secret=None,
     profile=None,
     private_key=None,
+    timeout=10.0,
 )
 request = await smart.authorization_request()
 tokens = await smart.exchange_code(code, request.code_verifier)
@@ -27,6 +28,8 @@ tokens = await smart.exchange_code(code, request.code_verifier)
   `client_secret_post`, or `private_key_jwt` when `private_key=` is set.
 - When the scope includes `launch/patient`, a token response without `patient`
   raises `TokenError`.
+- Discovery and token requests time out after `timeout` seconds; a transport
+  failure at the token endpoint raises `TokenError`.
 
 ## State and PKCE: the caller's job
 

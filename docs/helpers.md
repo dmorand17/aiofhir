@@ -22,6 +22,11 @@ ignore a filter), and returns a `Summary`.
 `documents()` returns titles and dates only. It never reads document content,
 attachments or narrative.
 
+`active_medications()` reads referenced Medications concurrently. If one read
+fails, that item keeps its citation without a medication name, and the summary
+gets a warning. `upcoming_appointments()` also checks the window itself, for
+servers that ignore the `date` filter.
+
 ## Summary
 
 ```python
@@ -81,8 +86,9 @@ FhirClient(fhir_base_url, provider, profile=None, max_concurrency=4, timeout=10.
   `Retry-After` up to 30 seconds. Reads and searches (GET and `POST _search`)
   are also retried after a dropped connection or a timeout, within the same two
   retries. On a 401 it refreshes once and retries.
-- Follows `next` links only inside the FHIR base. A profile can page another way
-  (Haste uses `_offset`).
+- Follows `next` links only inside the FHIR base, including after decoding
+  percent-encoded dot segments. A profile can page another way (Haste uses
+  `_offset`). A resource returned twice across pages is dropped, with a warning.
 - A search whose GET URL would pass 2,000 characters is sent as a form-encoded
   `POST [type]/_search`, which also keeps its parameters out of the URL.
 - `on_request` (sync or async) receives a `RequestEvent` for every attempt:

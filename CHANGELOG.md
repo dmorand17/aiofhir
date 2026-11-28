@@ -7,8 +7,17 @@ change the API.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-27
+
+A hardening release: fixes from the code reviews of 0.1.0. No API is removed.
+
 ### Security
 
+- `next` links with percent-encoded dot segments (`%2e%2e`, `..%2f`) are no
+  longer followed out of the FHIR base, so a server cannot steer paging, with the
+  patient's token, to another path on the same host.
+- `upcoming_appointments` checks the date window itself and drops appointments
+  that start outside it, for servers that ignore the `date` filter.
 - `FhirError` messages are redacted: server diagnostics often echo patient ids,
   identifiers or names. The raw OperationOutcome is kept on `FhirError.outcome`
   (it can hold PHI; do not log it).
@@ -25,12 +34,27 @@ change the API.
 
 ### Changed
 
+- The development tools are a dependency group instead of a `dev` extra, so PyPI
+  no longer lists `aiofhir[dev]`. Contributors run `uv sync --all-extras`
+  (`just sync`).
+- The SMART discovery cache is keyed by base URL and profile, and entries expire
+  after an hour.
+- `active_medications` reads referenced Medications concurrently. A failed read
+  keeps the item, without a medication name, and adds a warning instead of
+  failing the whole summary.
 - The README security model and the getting-started logging section say what
   is redacted, how to add `RedactingFilter` to an application's own handlers,
   and that redaction is best effort.
 
 ### Fixed
 
+- Entering an already-open `FhirClient` raises `RuntimeError` instead of leaking
+  the first HTTP client.
+- Discovery and token requests have a timeout (`SmartClient(timeout=10.0)`), and
+  a transport failure at the token endpoint raises `TokenError`.
+- Resources that a server returns twice across pages (offset paging over
+  changing data) are dropped, with a warning. Offset paging can still skip a
+  record that moves between pages.
 - `FhirClient` retries reads and searches (GET and `POST [type]/_search`) after
   a dropped connection or a timeout, twice, with the same backoff and jitter as
   for 429/502/503/504. Each attempt reaches `on_request`.
@@ -71,4 +95,6 @@ Health (Cerner) profiles are not yet verified against their sandboxes.
 - Redacting log helpers: tokens, person references and patient-identifying
   search values are removed from log lines.
 
+[Unreleased]: https://github.com/dmorand17/aiofhir/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/dmorand17/aiofhir/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/dmorand17/aiofhir/releases/tag/v0.1.0

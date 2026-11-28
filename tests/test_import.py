@@ -32,4 +32,4 @@ def test_version_comes_from_the_package_metadata() -> None:
 
     import aiofhir
 
-    assert aiofhir.__version__ == version("aiofhir") == "0.1.0"
+    assert aiofhir.__version__ == version("aiofhir") == "0.1.1"
