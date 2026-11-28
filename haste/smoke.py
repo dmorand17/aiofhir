@@ -1,4 +1,5 @@
-"""Sign in with a browser as the seeded patient and print the Haste record helpers.
+"""Sign in with a browser as the seeded patient and print a patient-scoped search
+of each type the server supports.
 
 Reads BASE from the environment or a .env file. The smoke client is the one
 haste/seed.py creates: SMOKE_CLIENT_ID (default aiofhir-smoke) and

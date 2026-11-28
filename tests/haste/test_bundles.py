@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -65,7 +64,7 @@ def test_walters_policy_reads_only_walter() -> None:
     assert not decide(policy, "DELETE", "MedicationRequest/ww-mr-metformin", store)
 
 
-async def test_walters_record_through_the_helpers() -> None:
+async def test_walters_record_through_search_raw() -> None:
     resources = _walter()
     base = "https://fhir.example/r4"
 
@@ -80,25 +79,18 @@ async def test_walters_record_through_the_helpers() -> None:
         async def refresh(self, stale: str | None = None) -> str:
             return "t"
 
+    statement = json.loads(
+        (Path(__file__).parents[1] / "fixtures" / "capability-statement.json").read_text()
+    )
     with respx.mock:
+        respx.get(f"{base}/metadata").respond(200, json=statement)
         respx.get(f"{base}/MedicationRequest").respond(200, json=bundle_of("MedicationRequest"))
         respx.get(f"{base}/Appointment").respond(200, json=bundle_of("Appointment"))
-        respx.get(f"{base}/Medication/ww-med-atorvastatin").respond(
-            200, json=resources["Medication/ww-med-atorvastatin"]
-        )
         async with FhirClient(base, Tokens()) as fhir:
-            record = PatientRecord(
-                fhir, patient_id="walter-white", clock=lambda: datetime(2026, 11, 28, tzinfo=UTC)
-            )
-            meds = await record.active_medications()
-            upcoming = await record.upcoming_appointments()
-    assert sorted(item.text for item in meds.items) == [
-        "Atorvastatin 20 mg tablet: Take 1 tablet at bedtime",
-        "Lisinopril 10 mg tablet: Take 1 tablet once daily",
-        "Metformin 500 mg tablet: Take 1 tablet twice daily with meals",
-    ]
-    assert [item.text for item in upcoming.items] == [
-        "Primary care follow-up",
-        "Fasting lab work",
-        "Pulmonology consult",
-    ]
+            record = PatientRecord(fhir, patient_id="walter-white")
+            meds = await record.search_raw("MedicationRequest")
+            upcoming = await record.search_raw("Appointment")
+    assert sorted(r["id"] for r in meds.resources) == sorted(
+        k.split("/")[1] for k in resources if k.startswith("MedicationRequest/")
+    )
+    assert len(upcoming.resources) == 5

@@ -68,7 +68,16 @@ def test_cerner_per_resource_scopes_are_intersected() -> None:
             "online_access",
         ],
     )
-    assert scopes_from_capabilities(cfg) == (
+    resources = [
+        "Patient",
+        "Appointment",
+        "MedicationRequest",
+        "AllergyIntolerance",
+        "Condition",
+        "Observation",
+        "Encounter",
+    ]
+    assert scopes_from_capabilities(cfg, resources=resources) == (
         "patient/Patient.read patient/Appointment.read patient/MedicationRequest.read "
         "patient/AllergyIntolerance.read patient/Condition.read patient/Observation.read "
         "launch/patient openid online_access"

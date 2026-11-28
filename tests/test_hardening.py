@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 import httpx
 import pytest
 import respx
 
-from aiofhir import FhirClient, PatientRecord
+from aiofhir import FhirClient
 from aiofhir.errors import DiscoveryError, TokenError
 from aiofhir.profiles import GenericProfile, HasteProfile
 from aiofhir.smart import SmartClient
@@ -16,7 +14,6 @@ from aiofhir.smart import discovery as discovery_module
 from aiofhir.smart.discovery import clear_discovery_cache, discover
 
 BASE = "http://fhir.example/w/acme/prod/api/v1/fhir"
-WHEN = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
 
 
 class FakeTokens:
@@ -70,39 +67,6 @@ async def test_encoded_dot_segments_in_next_links_are_not_followed(path: str) ->
             result = await fhir.search("Observation")
     assert not escaped.called
     assert any("outside the FHIR base" in w for w in result.warnings)
-
-
-# L1: upcoming appointments outside the window
-
-
-async def test_upcoming_appointments_drop_starts_outside_the_window() -> None:
-    def appointment(appointment_id: str, start: str | None) -> dict[str, object]:
-        resource: dict[str, object] = {
-            "resourceType": "Appointment",
-            "id": appointment_id,
-            "status": "booked",
-            "description": appointment_id,
-        }
-        if start:
-            resource["start"] = start
-        return resource
-
-    with respx.mock:
-        respx.get(f"{BASE}/Appointment").respond(
-            200,
-            json=_bundle(
-                [
-                    appointment("past", "2026-05-01T10:00:00Z"),
-                    appointment("soon", "2026-06-03T10:00:00Z"),
-                    appointment("too-far", "2026-12-01T10:00:00Z"),
-                    appointment("no-start", None),
-                ]
-            ),
-        )
-        async with FhirClient(BASE, FakeTokens(), sleep=_no_sleep) as fhir:
-            record = PatientRecord(fhir, patient_id="pt-1", clock=lambda: WHEN)
-            summary = await record.upcoming_appointments(days=30)
-    assert [item.citation.id for item in summary.items] == ["soon", "no-start"]
 
 
 # C5: re-entering an open client
@@ -171,36 +135,6 @@ async def test_the_discovery_cache_expires(monkeypatch: pytest.MonkeyPatch) -> N
             now[0] += 3601
             await discover(BASE, GenericProfile(), http)
     assert route.call_count == 2
-
-
-# C4: medication reads
-
-
-async def test_a_failed_medication_read_keeps_the_rest_of_the_summary() -> None:
-    def request(request_id: str, medication: str) -> dict[str, object]:
-        return {
-            "resourceType": "MedicationRequest",
-            "id": request_id,
-            "status": "active",
-            "medicationReference": {"reference": f"Medication/{medication}"},
-        }
-
-    with respx.mock:
-        respx.get(f"{BASE}/MedicationRequest").respond(
-            200, json=_bundle([request("mr-ok", "med-ok"), request("mr-gone", "med-gone")])
-        )
-        respx.get(f"{BASE}/Medication/med-ok").respond(
-            200, json={"resourceType": "Medication", "id": "med-ok", "code": {"text": "Aspirin"}}
-        )
-        respx.get(f"{BASE}/Medication/med-gone").respond(404)
-        async with FhirClient(BASE, FakeTokens(), sleep=_no_sleep) as fhir:
-            record = PatientRecord(fhir, patient_id="pt-1", clock=lambda: WHEN)
-            summary = await record.active_medications()
-    assert [(i.citation.id, i.text) for i in summary.items] == [
-        ("mr-ok", "Aspirin"),
-        ("mr-gone", ""),
-    ]
-    assert any("MedicationRequest/mr-gone" in w for w in summary.warnings)
 
 
 # M1: repeated resources across pages

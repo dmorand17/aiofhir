@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import time
+from pathlib import Path
 from urllib.parse import parse_qs
 
 import httpx
@@ -17,6 +19,9 @@ from aiofhir.smart import ClientAssertionKey, SmartClient
 from aiofhir.smart.discovery import clear_discovery_cache
 
 BASE = "https://fhir.example/r4"
+STATEMENT = json.loads(
+    (Path(__file__).parent / "fixtures" / "capability-statement.json").read_text()
+)
 TOKEN = "https://auth.example/token"
 
 
@@ -151,6 +156,7 @@ async def test_client_credentials_uses_listed_per_resource_system_scopes() -> No
         respx.get(f"{BASE}/.well-known/smart-configuration").respond(
             200, json=_config(["client_secret_basic"], scopes=listed)
         )
+        respx.get(f"{BASE}/metadata").respond(200, json=STATEMENT)
         route = respx.post(TOKEN).respond(200, json=_token_response())
         await smart.client_credentials()
     assert _form(route.calls.last.request)["scope"] == "system/Patient.rs system/Observation.rs"

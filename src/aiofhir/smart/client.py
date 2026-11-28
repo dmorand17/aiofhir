@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlencode
 
 import httpx
 
+from aiofhir.capability import fetch_capability_statement, readable_types
 from aiofhir.errors import AuthExpired, StateMismatch, TokenError
 from aiofhir.log import redact_text
 from aiofhir.profiles.base import ServerProfile
@@ -20,7 +21,11 @@ from aiofhir.profiles.generic import GenericProfile
 from aiofhir.smart.assertion import ASSERTION_TYPE, ClientAssertionKey
 from aiofhir.smart.discovery import SmartConfiguration, discover
 from aiofhir.smart.pkce import challenge_s256, make_state, make_verifier
-from aiofhir.smart.scopes import scopes_from_capabilities, system_scopes_from_capabilities
+from aiofhir.smart.scopes import (
+    lists_wildcard,
+    scopes_from_capabilities,
+    system_scopes_from_capabilities,
+)
 from aiofhir.smart.tokens import TokenSet, fhir_user_from_id_token
 
 logger = logging.getLogger(__name__)
@@ -119,7 +124,7 @@ class SmartClient:
         if launch and not self.ehr_launch:
             raise ValueError("use SmartClient.for_ehr_launch for an EHR launch")
         configuration = await self._configuration()
-        scope = self._scope(configuration)
+        scope = await self._scope(configuration)
         logger.info("preparing authorization request for %s", self.client_id)
         logger.debug("authorization scope %s", scope)
         state = make_state()
@@ -145,7 +150,7 @@ class SmartClient:
 
     async def exchange_code(self, code: str, verifier: str) -> TokenSet:
         configuration = await self._configuration()
-        scope = self._scope(configuration)
+        scope = await self._scope(configuration)
         logger.info("exchanging authorization code for %s", self.client_id)
         body = await self._token_request(
             configuration,
@@ -191,17 +196,32 @@ class SmartClient:
         if self.private_key is None and not self.client_secret:
             raise TokenError("client_credentials needs a confidential client")
         configuration = await self._configuration()
-        requested = scope if scope is not None else system_scopes_from_capabilities(configuration)
+        requested = scope
+        if requested is None:
+            resources = await self._resource_types(configuration, system=True)
+            requested = system_scopes_from_capabilities(configuration, resources)
         logger.info("requesting a client_credentials token for %s", self.client_id)
         body = await self._token_request(
             configuration, {"grant_type": "client_credentials", "scope": requested}
         )
         return self._token_set(body, requested, require_patient=False)
 
-    def _scope(self, configuration: SmartConfiguration) -> str:
+    async def _scope(self, configuration: SmartConfiguration) -> str:
         if self.scope is not None:
             return self.scope
-        return scopes_from_capabilities(configuration, ehr_launch=self.ehr_launch)
+        resources = await self._resource_types(configuration)
+        return scopes_from_capabilities(
+            configuration, ehr_launch=self.ehr_launch, resources=resources
+        )
+
+    async def _resource_types(
+        self, configuration: SmartConfiguration, *, system: bool = False
+    ) -> tuple[str, ...]:
+        """The CapabilityStatement's readable types, fetched only when no wildcard is allowed."""
+        if lists_wildcard(configuration, system=system):
+            return ()
+        async with httpx.AsyncClient(timeout=self._timeout) as http:
+            return readable_types(await fetch_capability_statement(self.base, http))
 
     async def _configuration(self) -> SmartConfiguration:
         async with httpx.AsyncClient(timeout=self._timeout) as http:

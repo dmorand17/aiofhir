@@ -43,7 +43,6 @@ up to the application:
 3. Use each pair once: delete it before or right after the code exchange, and
    expire unused pairs (the reference backend uses 10 minutes).
 
-The [reference backend](server.md) does all three.
 
 ## Scopes
 

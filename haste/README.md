@@ -8,7 +8,7 @@ with `just seed` and `just smoke`, or `uv run python -m haste.seed` and
 | Path | Purpose |
 |---|---|
 | `seed.py`, `seeding.py` | Seed entry point and the idempotent seed resources |
-| `smoke.py`, `login.py` | Browser sign-in, every record helper, one forced refresh |
+| `smoke.py`, `login.py` | Browser sign-in, a search of each supported type, one forced refresh |
 | `check_policy.py`, `policy_check.py` | Live check of the patient access policy and the admin seed client |
 | `policy_model.py` | Offline model of Haste's rule engine, used by `tests/haste/test_policy.py` |
 | `bundles/` | Hand-posted transactions: the admin seed client, and a seed cleanup |
@@ -162,7 +162,7 @@ on the client asking for `patient/` scopes. It grants only:
 - reads of `Observation`, `Condition`, `MedicationRequest`, `AllergyIntolerance`
   and `Appointment` whose stored `subject`, `patient` or `participant.actor`
   is that Patient;
-- `GET Medication/{id}` (reference data the medication helper resolves).
+- `GET Medication/{id}` (reference data a MedicationRequest points to).
 
 Everything else is denied: other patients, every search, every `_history`,
 compartment URLs, operations, batch and transaction, and all writes.
@@ -176,11 +176,11 @@ always empty in a policy expression (HasteHealth `fhir-client/src/url.rs`,
 the patient id either. So a policy can allow a search *type* or deny it, but it
 can't limit a search to one patient.
 
-The record helpers and `just smoke` need searches. `SEED_ALLOW_SEARCH=1 just seed`
+`search_raw` and `just smoke` need searches. `SEED_ALLOW_SEARCH=1 just seed`
 adds a rule that allows type searches of `Patient` and the five types above,
 whatever the parameters. Then only the token confines them:
 
-- a `patient/` token (`aiofhir-smoke`, the chat bot) is safe. Haste filters
+- a `patient/` token (`aiofhir-smoke`) is safe. Haste filters
   every search to the patient's compartment;
 - a `user/` or `system/` token the patient obtains is not. One way to get one is
   signing in to Haste's built-in `admin-app` client. With such a token, the
@@ -234,8 +234,7 @@ AIOFHIR_LIVE=1 just test tests/live
 The live tests check that:
 
 - the token response names a patient;
-- every helper item is cited and belongs to that patient;
-- the seeded cancelled appointment is filtered out;
+- every patient-searchable type returns only that patient's resources;
 - paging with `_count=1` follows `next` links and stops.
 
 Delete `haste/.tokens.json` when you are done.
@@ -323,7 +322,7 @@ session. Remove the token and sign in again as the admin. An admin token shows
 | Symptom | Cause | Fix |
 |---|---|---|
 | `Haste rejected the admin token (401)` | `HASTE_TOKEN` in `.env` has expired | Delete the `HASTE_TOKEN` line and run again to sign in |
-| `just smoke` or the live helper tests get 403 on searches | The policy was seeded without searches | `SEED_ALLOW_SEARCH=1 just seed` (read the risk under *Searches*) |
+| `just smoke` or the live search tests get 403 on searches | The policy was seeded without searches | `SEED_ALLOW_SEARCH=1 just seed` (read the risk under *Searches*) |
 | `bundle post failed (403)` | Signed in as the wrong account (usually the patient) | Delete `HASTE_TOKEN` and run again in a private window as the admin |
 | `haste/.env is ignored` warning | Leftover from older versions | Move its values to the repo-root `.env`, then delete it |
 

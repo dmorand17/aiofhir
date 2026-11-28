@@ -28,7 +28,7 @@ class FhirError(AiofhirError):
 
     The message is redacted (tokens, person references and identifying search
     values), because servers often echo ids or names in their diagnostics and the
-    message ends up in logs, tracebacks and agent tool output. The server's raw
+    message ends up in logs, tracebacks and user-facing output. The server's raw
     OperationOutcome, when there was one, is kept on `outcome`. It can hold PHI:
     do not log it.
     """

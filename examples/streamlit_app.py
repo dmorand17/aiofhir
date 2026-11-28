@@ -1,4 +1,4 @@
-"""A Streamlit demo of aiofhir: SMART sign-in, then every record helper.
+"""A Streamlit demo of aiofhir: SMART sign-in, then patient-scoped searches.
 
 Run it with `just demo` (Streamlit on port 8765). It reads the repo-root .env:
 
@@ -16,10 +16,10 @@ What it shows:
   once. Signing in leaves the app, so the browser comes back in a new Streamlit
   session; a per-session store would lose them.
 - Tokens live only in this browser session's server-side state, in memory. They
-  are never displayed. This is fine for a local demo; an agent in production
-  should use `RemoteRecord` and the `aiofhir[server]` backend instead.
-- Each helper's `Summary` is shown twice: formatted for a person in their time
-  zone, and as `to_text()`, exactly what a model would read.
+  are never displayed. This is fine for a local demo; in production keep tokens
+  in your backend.
+- The resource types come from the server's CapabilityStatement: each type with a
+  `patient` search parameter can be searched with `PatientRecord.search_raw`.
 """
 
 from __future__ import annotations
@@ -32,18 +32,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
-from zoneinfo import available_timezones
 
 import streamlit as st
 from dotenv import load_dotenv
 
-from aiofhir import RECORD_HELPERS, AuthExpired, FhirClient, PatientRecord, Record
-from aiofhir.display import format_summary
+from aiofhir import AuthExpired, FhirClient, PatientRecord
+from aiofhir.client import SearchResult
 from aiofhir.errors import AiofhirError, FhirError
 from aiofhir.profiles import CernerProfile, EpicProfile, GenericProfile, HasteProfile
 from aiofhir.profiles.base import ServerProfile
 from aiofhir.smart import RefreshingToken, SmartClient, TokenSet, verify_state
-from aiofhir.summary import Summary
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
@@ -99,18 +97,10 @@ def _new_pending_store() -> dict[str, Pending]:
 pending_sign_ins: Callable[[], dict[str, Pending]] = st.cache_resource(_new_pending_store)
 
 
-async def load_record(record: Record) -> dict[str, Summary]:
-    """Every helper, one after another, through the `Record` protocol."""
-    summaries: dict[str, Summary] = {}
-    for name in RECORD_HELPERS:
-        summaries[name] = await getattr(record, name)()
-    return summaries
-
-
 async def read_patient_record(
     smart: SmartClient, tokens: TokenSet
-) -> tuple[dict[str, Any] | None, dict[str, Summary]]:
-    """The Patient resource and every helper's summary."""
+) -> tuple[dict[str, Any] | None, dict[str, SearchResult]]:
+    """The Patient resource and a search of every type the server can scope to the patient."""
 
     async def keep(refreshed: TokenSet) -> None:
         st.session_state["tokens"] = refreshed  # a rotated refresh token must not be lost
@@ -122,7 +112,8 @@ async def read_patient_record(
         # search_raw forces `_id` to the token's patient: the app cannot ask for anyone else.
         found = await record.search_raw("Patient")
         patient = found.resources[0] if found.resources else None
-        return patient, await load_record(record)
+        types = sorted(await record.searchable_types() - {"Patient"})
+        return patient, {name: await record.search_raw(name) for name in types}
 
 
 async def try_another_patient(
@@ -134,7 +125,7 @@ async def try_another_patient(
     async with FhirClient(smart.base, holder, profile=smart.profile) as fhir:
         record = PatientRecord(fhir, patient_id=tokens.patient or "")
 
-        # 1. The helpers never take a patient from the caller; nothing is sent.
+        # 1. search_raw never takes a patient from the caller; nothing is sent.
         try:
             await record.search_raw("Patient", {"_id": other_id})
             rows.append(_row("search_raw(Patient, _id=...)", "aiofhir", False, "the search ran"))
@@ -186,14 +177,14 @@ def patient_name(patient: dict[str, Any]) -> str:
     return "Unnamed patient"
 
 
-def items_table(summary: Summary) -> list[dict[str, Any]]:
+def resources_table(result: SearchResult) -> list[dict[str, Any]]:
     return [
         {
-            "text": item.text,
-            "date": item.at.isoformat() if item.at is not None else "",
-            "citation": str(item.citation),
+            "id": str(resource.get("id") or ""),
+            "status": str(resource.get("status") or ""),
+            "updated": str((resource.get("meta") or {}).get("lastUpdated") or ""),
         }
-        for item in summary.items
+        for resource in result.resources
     ]
 
 
@@ -264,7 +255,7 @@ def callback() -> None:
         st.page_link(HOME, label="Back to the demo")
         return
     st.session_state["tokens"] = tokens
-    st.session_state.pop("summaries", None)
+    st.session_state.pop("results", None)
     st.session_state.pop("patient", None)
     st.query_params.clear()
     st.switch_page(HOME)
@@ -276,27 +267,22 @@ def show_record(smart: SmartClient, tokens: TokenSet) -> None:
         st.write(f"Patient: `{tokens.patient}`")
         st.write(f"Token expires: {tokens.expires_at:%Y-%m-%d %H:%M} UTC")
         st.caption(f"Scope: {tokens.scope}")
-        zone = st.selectbox(
-            "Your time zone",
-            sorted(available_timezones()),
-            index=sorted(available_timezones()).index("America/New_York"),
-        )
         if st.button("Sign out"):
-            for key in ("tokens", "patient", "summaries", "probe", "authorize_url"):
+            for key in ("tokens", "patient", "results", "probe", "authorize_url"):
                 st.session_state.pop(key, None)
             st.rerun()
 
     show_other_patient_probe(smart)
 
-    if st.button("Load the record", type="primary") or "summaries" in st.session_state:
-        if "summaries" not in st.session_state or "patient" not in st.session_state:
+    if st.button("Load the record", type="primary") or "results" in st.session_state:
+        if "results" not in st.session_state or "patient" not in st.session_state:
             try:
                 with st.spinner("Reading the record..."):
-                    patient, summaries_read = asyncio.run(
+                    patient, results_read = asyncio.run(
                         read_patient_record(smart, st.session_state["tokens"])
                     )
                 st.session_state["patient"] = patient
-                st.session_state["summaries"] = summaries_read
+                st.session_state["results"] = results_read
             except AuthExpired as exc:
                 st.session_state.pop("tokens", None)
                 st.error(str(exc))
@@ -305,10 +291,13 @@ def show_record(smart: SmartClient, tokens: TokenSet) -> None:
                 st.error(f"Reading the record failed: {exc}")
                 return
         show_patient(st.session_state.get("patient"))
-        summaries: dict[str, Summary] = st.session_state["summaries"]
-        for tab, name in zip(st.tabs(list(summaries)), summaries, strict=True):
-            with tab:
-                show_summary(summaries[name], zone)
+        results: dict[str, SearchResult] = st.session_state["results"]
+        counts = {name: len(result.resources) for name, result in results.items()}
+        name = st.selectbox(
+            "Resource type", list(results), format_func=lambda n: f"{n} ({counts[n]})"
+        )
+        if name is not None:
+            show_result(results[name])
 
 
 def show_other_patient_probe(smart: SmartClient) -> None:
@@ -345,21 +334,16 @@ def show_patient(patient: dict[str, Any] | None) -> None:
         st.json(patient)
 
 
-def show_summary(summary: Summary, zone: str) -> None:
-    if not summary.items:
+def show_result(result: SearchResult) -> None:
+    if not result.resources:
         st.info("Nothing found.")
-    person, agent = st.columns(2)
-    with person:
-        st.markdown("**For a person** (`format_summary`)")
-        st.code(format_summary(summary, tz=zone), language=None)
-    with agent:
-        st.markdown("**For a model** (`Summary.to_text`)")
-        st.code(summary.to_text(), language=None)
-    if summary.items:
-        st.dataframe(items_table(summary), hide_index=True)
-    for warning in summary.warnings:
+    else:
+        st.dataframe(resources_table(result), hide_index=True)
+        with st.expander("The resources (FHIR JSON)"):
+            st.json(list(result.resources))
+    for warning in result.warnings:
         st.warning(warning)
-    if summary.truncated:
+    if result.truncated:
         st.warning("Paging stopped at the page limit; there may be more.")
 
 

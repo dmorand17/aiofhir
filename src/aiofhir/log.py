@@ -187,7 +187,7 @@ class _FallbackHandler(logging.StreamHandler):  # type: ignore[type-arg]
     """Prints aiofhir records only while the application has no logging of its own.
 
     It decides on every record, not once: apps usually configure logging after
-    their imports (LiveKit Agents does it in ``cli.run_app``), and from then on
+    their imports, and from then on
     their handlers get the records instead, in their format, exactly once.
     """
 

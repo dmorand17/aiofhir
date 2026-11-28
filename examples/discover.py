@@ -1,4 +1,4 @@
-"""Discover a SMART server and print the scope Phase 1 would request.
+"""Discover a SMART server and print its endpoints, resource types and the derived scope.
 
 Reads BASE from the environment. A .env file in the repo root or in this
 directory is loaded first, and an already-set BASE is left as-is.
@@ -14,6 +14,7 @@ from pathlib import Path
 import httpx
 from dotenv import load_dotenv
 
+from aiofhir.capability import fetch_capability_statement, patient_search_types, readable_types
 from aiofhir.log import configure_cli_logging
 from aiofhir.profiles import HasteProfile
 from aiofhir.smart.discovery import discover
@@ -37,10 +38,14 @@ async def main() -> None:
     base = _base_url()
     async with httpx.AsyncClient() as http:
         configuration = await discover(base, HasteProfile(), http)
-    scope = scopes_from_capabilities(configuration)
+        statement = await fetch_capability_statement(base, http)
+    readable = readable_types(statement)
+    scope = scopes_from_capabilities(configuration, resources=readable)
     print(f"base: {base.rstrip('/')}")
     print(f"authorization_endpoint: {configuration.authorization_endpoint}")
     print(f"token_endpoint: {configuration.token_endpoint}")
+    print(f"readable types: {', '.join(readable)}")
+    print(f"patient-searchable types: {', '.join(sorted(patient_search_types(statement)))}")
     print(f"scope: {scope}")
 
 

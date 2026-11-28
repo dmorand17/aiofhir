@@ -1,10 +1,9 @@
 # aiofhir
 
-An async FHIR R4 and SMART on FHIR client for Python, built on httpx. It signs a
-patient in, reads their record, and returns compact, cited summaries that an AI
-agent can read aloud: upcoming appointments, medications, allergies, labs and
-more. It is built for LiveKit voice and chat agents but has no LiveKit
-dependency.
+An async FHIR R4 and SMART on FHIR client for Python, built on httpx. It
+discovers a server's SMART configuration and CapabilityStatement, signs a user in
+with PKCE, keeps the access token fresh, and searches the signed-in patient's
+record for any resource type the server supports.
 
 ## 🚀 Quick start
 
@@ -21,24 +20,21 @@ tokens = await smart.exchange_code(code, saved.code_verifier)
 
 async with FhirClient(FHIR_BASE, RefreshingToken(smart, tokens), profile=smart.profile) as fhir:
     record = PatientRecord(fhir, patient_id=tokens.patient)
-    meds = await record.active_medications()
-    print(meds.to_text())
+    print(sorted(await record.searchable_types()))  # from the CapabilityStatement
+    meds = await record.search_raw("MedicationRequest", {"status": "active"})
+    for resource in meds.resources:
+        print(resource["id"])
 ```
 
-```text
-active_medications
-- «Lisinopril» (MedicationRequest/mr-inline)
-- «Metformin» (MedicationRequest/mr-remote)
-```
-
-The scope is built from the server's SMART configuration, the patient id comes
-only from the token response, and every item cites the FHIR resource it came from.
+The scope is built from the server's SMART configuration (and its
+CapabilityStatement when no wildcard scope is offered), the resource types come
+from the CapabilityStatement, and the patient id comes only from the token
+response.
 
 ## 📦 Installation
 
 ```bash
 pip install aiofhir                 # core: httpx only
-pip install "aiofhir[server]"       # reference backend for RemoteRecord (FastAPI)
 pip install "aiofhir[jwt]"          # private_key_jwt client authentication (PyJWT)
 ```
 
@@ -53,14 +49,14 @@ reproducible build; uv records the source under `[tool.uv.sources]` in your
 ```bash
 uv add git+https://github.com/dmorand17/aiofhir --tag v0.1.0                  # a release
 uv add git+https://github.com/dmorand17/aiofhir --branch main                 # latest main
-uv add git+https://github.com/dmorand17/aiofhir --tag v0.1.0 --extra server   # with an extra
+uv add git+https://github.com/dmorand17/aiofhir --tag v0.1.0 --extra jwt      # with an extra
 ```
 
 Or as a requirement string, for example in `pyproject.toml` or with pip:
 
 ```bash
-uv add "aiofhir[server] @ git+https://github.com/dmorand17/aiofhir@v0.1.0"
-pip install "aiofhir[server] @ git+https://github.com/dmorand17/aiofhir@v0.1.0"
+uv add "aiofhir[jwt] @ git+https://github.com/dmorand17/aiofhir@v0.1.0"
+pip install "aiofhir[jwt] @ git+https://github.com/dmorand17/aiofhir@v0.1.0"
 ```
 
 `git+ssh://git@github.com/dmorand17/aiofhir` works the same way with an SSH key.
@@ -69,11 +65,10 @@ pip install "aiofhir[server] @ git+https://github.com/dmorand17/aiofhir@v0.1.0"
 
 | Guide | Covers |
 | --- | --- |
-| [Getting started](https://github.com/dmorand17/aiofhir/blob/main/docs/getting-started.md) | A first sign-in and record read, step by step |
+| [Getting started](https://github.com/dmorand17/aiofhir/blob/main/docs/getting-started.md) | A first sign-in and patient-scoped search, step by step |
 | [Sign-in and state handling](https://github.com/dmorand17/aiofhir/blob/main/docs/sign-in.md) | Standalone and EHR launch, state and PKCE, tokens and refresh, backend services |
-| [Record helpers](https://github.com/dmorand17/aiofhir/blob/main/docs/helpers.md) | The ten helpers, `Summary`, raw search, and the FHIR client |
+| [Search and the FHIR client](https://github.com/dmorand17/aiofhir/blob/main/docs/search.md) | Patient-scoped search, the FHIR client, and the CapabilityStatement helpers |
 | [Server profiles](https://github.com/dmorand17/aiofhir/blob/main/docs/profiles.md) | Haste Health, Epic, Oracle Health (Cerner) and generic servers; how scopes are chosen |
-| [Server-side token mode](https://github.com/dmorand17/aiofhir/blob/main/docs/server.md) | Keeping tokens out of agents with `RemoteRecord` and `aiofhir[server]` |
 
 Epic and Oracle Health (Cerner) profiles are not yet verified against their
 sandboxes. Haste Health is verified live; see [`haste/`](https://github.com/dmorand17/aiofhir/tree/main/haste)
@@ -89,9 +84,9 @@ for the seed and smoke scripts.
   tracebacks are redacted too, and keep `httpx` at `WARNING` (it logs full URLs).
   Redaction is best effort: a bare id with no context cannot be recognized, so
   still treat logs as sensitive.
-- Helpers add `patient=` from the token themselves and refuse a caller-supplied patient.
-- Agents should hold no FHIR tokens at all: use `RemoteRecord` with the
-  `aiofhir[server]` backend.
+- `PatientRecord.search_raw` adds `patient=` from the token itself, refuses a
+  caller-supplied patient, and searches only types the CapabilityStatement says
+  can be searched by patient.
 - Storing OAuth `state` and the PKCE verifier, and using them once, is the
   caller's job; `verify_state()` compares in constant time.
 
@@ -109,14 +104,13 @@ Run `just` with no arguments to list every recipe.
 
 | Recipe | What it does |
 | --- | --- |
-| `just test [args]` | pytest; arguments pass through, for example `just test tests/test_record.py -k labs` |
+| `just test [args]` | pytest; arguments pass through, for example `just test tests/test_capability.py -k scope` |
 | `just lint` / `just fmt-check` | ruff lint / check formatting without writing files |
 | `just fmt` / `just fix` | format with ruff / apply ruff autofixes and format |
 | `just typecheck` | mypy strict over `src`, `tests`, `examples` and `haste` |
 | `just lock` | refresh `uv.lock` after changing dependencies |
-| `just serve` | run the `aiofhir[server]` backend; see [server-side token mode](https://github.com/dmorand17/aiofhir/blob/main/docs/server.md) for its environment |
-| `just discover` | print a server's SMART endpoints and the scope aiofhir would request, for `BASE` |
-| `just demo` | a Streamlit app that signs in and shows every helper; see [getting started](https://github.com/dmorand17/aiofhir/blob/main/docs/getting-started.md#try-it-in-streamlit) |
+| `just discover` | print a server's SMART endpoints, its resource types and the scope aiofhir would request, for `BASE` |
+| `just demo` | a Streamlit app that signs in and searches each supported type; see [getting started](https://github.com/dmorand17/aiofhir/blob/main/docs/getting-started.md#try-it-in-streamlit) |
 
 ### Live tests against Haste Health
 
@@ -126,8 +120,8 @@ covers setup.
 
 | Recipe | What it does |
 | --- | --- |
-| `just seed` | create or update the seed patient, chart, smoke client and access policy (`SEED_ALLOW_SEARCH=1` for the helpers) |
-| `just smoke` | sign in as the patient in a browser and print every helper; `SAVE_TOKENS=1` saves the token for the live tests |
+| `just seed` | create or update the seed patient, chart, smoke client and access policy (`SEED_ALLOW_SEARCH=1` for searches) |
+| `just smoke` | sign in as the patient in a browser and search each supported type; `SAVE_TOKENS=1` saves the token for the live tests |
 | `AIOFHIR_LIVE=1 just test tests/live` | the live checks, using the saved token |
 | `just check-policy` / `just check-policy-as-patient` | check the seed's access policy, as the admin or as the patient |
 | `just seed-cleanup` | delete the admin seed client |

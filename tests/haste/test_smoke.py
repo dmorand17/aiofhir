@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import httpx
 import respx
 
@@ -7,6 +10,9 @@ from haste.login import capture_callback, run_smoke
 
 BASE = "http://fhir.example/r4"
 TOKEN = "http://auth.example/token"
+STATEMENT = json.loads(
+    (Path(__file__).parents[1] / "fixtures" / "capability-statement.json").read_text()
+)
 
 
 def _config() -> dict[str, object]:
@@ -47,8 +53,9 @@ async def test_capture_callback_checks_state_and_returns_the_code() -> None:
         assert await future == "auth-code"
 
 
-async def test_run_smoke_prints_helpers_forces_refresh_and_hides_tokens() -> None:
+async def test_run_smoke_searches_each_type_forces_refresh_and_hides_tokens() -> None:
     with respx.mock:
+        respx.get(f"{BASE}/metadata").respond(200, json=STATEMENT)
         respx.get(f"{BASE}/.well-known/smart-configuration").respond(200, json=_config())
         token_route = respx.post(TOKEN).mock(
             side_effect=[
@@ -74,6 +81,7 @@ async def test_run_smoke_prints_helpers_forces_refresh_and_hides_tokens() -> Non
             ]
         )
         for resource in (
+            "Patient",
             "Appointment",
             "MedicationRequest",
             "AllergyIntolerance",
@@ -90,8 +98,9 @@ async def test_run_smoke_prints_helpers_forces_refresh_and_hides_tokens() -> Non
             )
         report = await run_smoke(BASE, "aiofhir-smoke", None, "auth-code", "verifier-1")
     assert "patient: pt-1" in report
-    assert "upcoming_appointments" in report
-    assert "recent_labs" in report
+    assert "Appointment: 0" in report
+    assert "Observation: 0" in report
+    assert "Medication:" not in report
     assert "access-secret" not in report
     assert "refresh-secret" not in report
     assert token_route.call_count == 2
@@ -154,6 +163,7 @@ async def test_run_smoke_hands_out_the_exchanged_and_refreshed_tokens() -> None:
 
     with respx.mock:
         respx.get(f"{BASE}/.well-known/smart-configuration").respond(200, json=_config())
+        respx.get(f"{BASE}/metadata").respond(200, json=STATEMENT)
         respx.post(TOKEN).mock(
             side_effect=[
                 httpx.Response(
@@ -177,6 +187,7 @@ async def test_run_smoke_hands_out_the_exchanged_and_refreshed_tokens() -> None:
             ]
         )
         for resource in (
+            "Patient",
             "Appointment",
             "MedicationRequest",
             "AllergyIntolerance",

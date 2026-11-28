@@ -24,19 +24,13 @@ Changelog = "https://github.com/dmorand17/aiofhir/blob/main/CHANGELOG.md"
 Issues = "https://github.com/dmorand17/aiofhir/issues"
 
 [project.optional-dependencies]
-# Reference backend for RemoteRecord. Never imported by `import aiofhir`.
-server = [
-    "cryptography>=43",
-    "fastapi>=0.115",
-    "uvicorn>=0.32",
-]
 # private_key_jwt client authentication (RS384/ES384).
 jwt = [
     "pyjwt[crypto]>=2.10",
 ]
 
 # Development tools. A dependency group is never published as an extra; uv
-# installs it by default. `uv sync --all-extras` adds jwt and server for the tests.
+# installs it by default. `uv sync --all-extras` adds jwt for the tests.
 [dependency-groups]
 dev = [
     "mypy>=1.14",

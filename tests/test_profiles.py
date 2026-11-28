@@ -1,8 +1,9 @@
-"""Profile search quirks. Helpers stay free of vendor branches."""
+"""Profile search quirks. PatientRecord stays free of vendor branches."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import json
+from pathlib import Path
 
 import respx
 
@@ -12,6 +13,9 @@ from aiofhir.profiles import CernerProfile, EpicProfile, GenericProfile, HastePr
 _GE = "ge2026-06-01T12:00:00Z"
 _LT = "lt2026-08-30T12:00:00Z"
 _OPEN_LT = "lt9999-12-31T00:00:00Z"
+_STATEMENT = json.loads(
+    (Path(__file__).parent / "fixtures" / "capability-statement.json").read_text()
+)
 
 
 def test_generic_adapt_search_passes_params_through() -> None:
@@ -74,8 +78,9 @@ def test_epic_and_cerner_use_the_standard_discovery_path() -> None:
     assert CernerProfile().discovery_paths(base) == expected
 
 
-async def test_upcoming_appointments_drop_sort_on_epic() -> None:
+async def test_appointment_search_drops_sort_on_epic() -> None:
     with respx.mock:
+        respx.get("http://fhir.example/r4/metadata").respond(200, json=_STATEMENT)
         route = respx.get("http://fhir.example/r4/Appointment").respond(
             200, json={"resourceType": "Bundle", "entry": []}
         )
@@ -85,15 +90,16 @@ async def test_upcoming_appointments_drop_sort_on_epic() -> None:
             profile=EpicProfile(),
             sleep=_no_sleep,
         )
-        record = PatientRecord(fhir, patient_id="pt-1", clock=lambda: _WHEN)
+        record = PatientRecord(fhir, patient_id="pt-1")
         async with fhir:
-            await record.upcoming_appointments()
+            await record.search_raw("Appointment", {"_sort": "date"})
     assert "_sort" not in route.calls.last.request.url.params
     assert route.calls.last.request.url.params.get_list("patient") == ["pt-1"]
 
 
 async def test_appointment_search_gains_lt_on_cerner() -> None:
     with respx.mock:
+        respx.get("http://fhir.example/r4/metadata").respond(200, json=_STATEMENT)
         route = respx.get("http://fhir.example/r4/Appointment").respond(
             200, json={"resourceType": "Bundle", "entry": []}
         )
@@ -103,7 +109,7 @@ async def test_appointment_search_gains_lt_on_cerner() -> None:
             profile=CernerProfile(),
             sleep=_no_sleep,
         )
-        record = PatientRecord(fhir, patient_id="pt-1", clock=lambda: _WHEN)
+        record = PatientRecord(fhir, patient_id="pt-1")
         async with fhir:
             await record.search_raw("Appointment", {"date": [_GE]})
     assert route.calls.last.request.url.params.get_list("date") == [_GE, _OPEN_LT]
@@ -119,6 +125,3 @@ class _Tokens:
 
 async def _no_sleep(_seconds: float) -> None:
     return None
-
-
-_WHEN = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)

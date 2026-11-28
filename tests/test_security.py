@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import stat
 from pathlib import Path
@@ -19,10 +20,12 @@ from aiofhir.log import (
     redact_params,
     redact_url,
 )
-from aiofhir.profiles.base import ServerProfile, medication_reference_id
 
 HASTE = "https://api.haste.health/w/livekit/proj/api/v1/fhir"
 BASE = "http://fhir.example/r4"
+STATEMENT = json.loads(
+    (Path(__file__).parent / "fixtures" / "capability-statement.json").read_text()
+)
 
 
 class _Tokens:
@@ -90,41 +93,6 @@ async def test_read_refuses_a_bad_resource_type() -> None:
             await fhir.read("../Account", "1")
 
 
-@pytest.mark.parametrize(
-    ("reference", "expected"),
-    [
-        ("Medication/m1", "m1"),
-        ("Medication/m1/_history/2", "m1"),
-        ("https://other.example/fhir/Medication/x", None),
-        ("Medication/x?_format=xml", None),
-        ("Medication/../Account/1", None),
-        ("Patient/p1", None),
-    ],
-)
-def test_medication_reference_parsing(reference: str, expected: str | None) -> None:
-    assert medication_reference_id(reference) == expected
-
-
-async def test_foreign_medication_reference_is_not_read_and_display_is_used() -> None:
-    calls: list[tuple[str, str]] = []
-
-    async def read(resource_type: str, resource_id: str) -> dict[str, Any]:
-        calls.append((resource_type, resource_id))
-        return {}
-
-    text = await ServerProfile().resolve_medication(
-        {
-            "medicationReference": {
-                "reference": "https://other.example/fhir/Medication/x",
-                "display": "Metformin",
-            }
-        },
-        read,
-    )
-    assert calls == []
-    assert text == "Metformin"
-
-
 # S3 / S4: search_raw cannot widen the result or skip the forced patient.
 @pytest.mark.parametrize(
     "params",
@@ -148,6 +116,7 @@ async def test_search_raw_refuses_widening_parameters(params: dict[str, str]) ->
 
 async def test_search_raw_patient_uses_id_and_medication_is_not_searchable() -> None:
     with respx.mock:
+        respx.get(f"{BASE}/metadata").respond(200, json=STATEMENT)
         route = respx.get(f"{BASE}/Patient").respond(
             200, json=_bundle([{"resourceType": "Patient", "id": "pt-1"}])
         )
@@ -163,6 +132,7 @@ async def test_search_raw_patient_uses_id_and_medication_is_not_searchable() -> 
 
 async def test_search_raw_drops_resources_of_other_types() -> None:
     with respx.mock:
+        respx.get(f"{BASE}/metadata").respond(200, json=STATEMENT)
         respx.get(f"{BASE}/Observation").respond(
             200,
             json=_bundle(

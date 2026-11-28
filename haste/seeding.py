@@ -40,7 +40,7 @@ _HASTE_BASE = re.compile(r"^(https?://[^/]+/w/[^/]+)/[^/]+(/api/v1/fhir)/?$")
 # FHIR R4 id syntax. The patient id is written into FHIRPath string literals,
 # so anything else is refused rather than escaped.
 _FHIR_ID = re.compile(r"^[A-Za-z0-9\-.]{1,64}$")
-# Patient-compartment types the record helpers read, by the element that
+# Patient-compartment types in the seed chart, by the element that
 # names the patient. Only these may be read or searched, and only for the seed
 # patient.
 COMPARTMENT_TYPES: dict[str, tuple[str, ...]] = {
@@ -55,7 +55,7 @@ COMPARTMENT_TYPES: dict[str, tuple[str, ...]] = {
     "patient": ("AllergyIntolerance", "Immunization"),
     "participant.actor": ("Appointment",),
 }
-# Reference data outside any patient compartment that the helpers read by id
+# Reference data outside any patient compartment, read by id
 # (a MedicationRequest's medicationReference). Read only, never searched.
 SHARED_READ_TYPES = ("Medication",)
 
@@ -319,7 +319,7 @@ def build_appointments(patient_id: str, now: datetime) -> list[Json]:
 
 
 def build_chart(patient_id: str, now: datetime) -> list[Json]:
-    """A small chart covering the medication shapes the helper resolves."""
+    """A small chart covering the common medication shapes (inline, contained, referenced)."""
     subject = {"reference": f"Patient/{patient_id}"}
     return [
         _request(

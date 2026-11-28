@@ -18,6 +18,7 @@ from aiofhir.smart.discovery import clear_discovery_cache  # noqa: E402
 
 APP = str(Path(__file__).parents[1] / "examples" / "streamlit_app.py")
 FIXTURES = Path(__file__).parent / "fixtures" / "haste"
+_STATEMENT = json.loads((FIXTURES.parent / "capability-statement.json").read_text())
 BASE = "https://fhir.example/r4"
 
 
@@ -53,7 +54,7 @@ def test_starting_sign_in_keeps_state_on_the_server() -> None:
     assert "launch/patient" in query["scope"][0].split()
 
 
-def test_a_signed_in_session_shows_every_helper() -> None:
+def test_a_signed_in_session_searches_every_patient_type() -> None:
     tokens = TokenSet(
         access_token="access",
         refresh_token="refresh",
@@ -66,11 +67,13 @@ def test_a_signed_in_session_shows_every_helper() -> None:
         fhir_user=None,
     )
     with respx.mock:
+        respx.get(f"{BASE}/metadata").respond(200, json=_STATEMENT)
         for resource in (
             "Appointment",
             "MedicationRequest",
             "AllergyIntolerance",
             "Condition",
+            "Observation",
             "Immunization",
             "Encounter",
             "Procedure",
@@ -79,15 +82,6 @@ def test_a_signed_in_session_shows_every_helper() -> None:
             respx.get(f"{BASE}/{resource}").respond(
                 200, json=_fixture(f"{resource.lower()}-search.json")
             )
-        respx.get(f"{BASE}/Observation", params={"category": "vital-signs"}).respond(
-            200, json=_fixture("vital-signs-search.json")
-        )
-        respx.get(f"{BASE}/Observation", params={"category": "laboratory"}).respond(
-            200, json=_fixture("observation-search.json")
-        )
-        respx.get(f"{BASE}/Medication/med-remote").respond(
-            200, json=_fixture("medication-med-remote.json")
-        )
         patient = respx.get(f"{BASE}/Patient").respond(
             200, json={"resourceType": "Bundle", "entry": [{"resource": _fixture("patient.json")}]}
         )
@@ -99,10 +93,18 @@ def test_a_signed_in_session_shows_every_helper() -> None:
     assert not at.exception
     assert patient.calls.last.request.url.params["_id"] == "example-patient"
     assert any("Pat Example" in str(header.value) for header in at.subheader)
-    assert len(at.tabs) == 10
-    rendered = "\n".join(str(code.value) for code in at.code)
-    assert "«Lisinopril»" in rendered and "(MedicationRequest/mr-inline)" in rendered
-    assert "access" not in rendered.split() and "refresh" not in rendered.split()
+    [picker] = [box for box in at.selectbox if box.label == "Resource type"]
+    assert list(picker.options) == [
+        "AllergyIntolerance (1)",
+        "Appointment (6)",
+        "Condition (1)",
+        "DocumentReference (1)",
+        "Encounter (1)",
+        "Immunization (1)",
+        "MedicationRequest (4)",
+        "Observation (1)",
+        "Procedure (1)",
+    ]
 
 
 def test_opening_another_patient_is_blocked_by_aiofhir_and_the_server() -> None:

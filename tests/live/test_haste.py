@@ -18,15 +18,13 @@ from typing import Any
 import pytest
 from dotenv import load_dotenv
 
-from aiofhir import RECORD_HELPERS, FhirClient, PatientRecord
-from aiofhir.display import format_summary
+from aiofhir import FhirClient, PatientRecord
 from aiofhir.profiles import HasteProfile
 from aiofhir.smart import RefreshingToken, SmartClient, TokenSet
 from haste.login import REDIRECT_URI, load_tokens, save_tokens
-from haste.seeding import CLIENT_ID, SEED_SYSTEM
+from haste.seeding import CLIENT_ID
 
 _ROOT = Path(__file__).resolve().parents[2]
-_HELPERS = RECORD_HELPERS
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("AIOFHIR_LIVE") != "1",
@@ -73,7 +71,7 @@ async def _session() -> AsyncIterator[tuple[FhirClient, PatientRecord, TokenSet]
 
 
 def _references(resource: dict[str, Any]) -> list[str]:
-    """Every patient-pointing reference on the resource types the helpers return."""
+    """Every patient-pointing reference on a resource."""
     found: list[str] = []
     for key in ("subject", "patient"):
         value = resource.get(key)
@@ -96,30 +94,16 @@ async def test_token_response_names_a_patient() -> None:
         assert tokens.patient, "the token response has no patient; sign in as the patient user"
 
 
-async def test_every_helper_item_is_cited_and_belongs_to_the_patient() -> None:
-    async with _session() as (fhir, record, tokens):
+async def test_every_searchable_type_returns_only_the_patient() -> None:
+    async with _session() as (_fhir, record, tokens):
         assert tokens.patient
-        for name in _HELPERS:
-            summary = await getattr(record, name)()
-            assert summary.items, f"{name} returned nothing; is the seed loaded?"
-            for item in summary.items:
-                cited = await fhir.read(item.citation.resource_type, item.citation.id)
-                assert _belongs_to(cited, tokens.patient), f"{name} cited {item.citation}"
-            for text in (summary.to_text(), format_summary(summary, tz="UTC")):
-                assert tokens.access_token not in text
-                if tokens.refresh_token:
-                    assert tokens.refresh_token not in text
-
-
-async def test_cancelled_appointment_is_filtered_out() -> None:
-    async with _session() as (_fhir, record, _tokens):
-        found = await record.search_raw(
-            "Appointment", {"identifier": f"{SEED_SYSTEM}|appt-cancelled"}
-        )
-        assert len(found.resources) == 1, "the seeded cancelled appointment is missing"
-        cancelled = str(found.resources[0]["id"])
-        upcoming = await record.upcoming_appointments()
-    assert cancelled not in {item.citation.id for item in upcoming.items}
+        types = await record.searchable_types()
+        assert {"Patient", "Appointment", "Observation"} <= types
+        for resource in sorted(types):
+            result = await record.search_raw(resource)
+            for item in result.resources:
+                own = resource == "Patient" and item.get("id") == tokens.patient
+                assert own or _belongs_to(item, tokens.patient), f"{resource}/{item.get('id')}"
 
 
 async def test_paging_follows_next_links_and_terminates() -> None:

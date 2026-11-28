@@ -58,13 +58,9 @@ check-policy:
 check-policy-as-patient:
     uv run python -m haste.check_policy --as-patient
 
-# Sign in with the browser and print the record helpers.
+# Sign in with the browser and print a patient-scoped search of each supported type.
 smoke:
     uv run python -m haste.smoke
-
-# Run the aiofhir[server] reference backend. See src/aiofhir/server/__main__.py for its env.
-serve:
-    uv run python -m aiofhir.server
 
 # Run the Streamlit demo on port 8765, the redirect URI the seeded smoke client allows.
 demo:

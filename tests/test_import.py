@@ -1,4 +1,4 @@
-"""Importing aiofhir must not pull in LiveKit or FastAPI."""
+"""Importing aiofhir must not pull in optional extras."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 
-def test_import_aiofhir_loads_no_livekit_or_fastapi() -> None:
+def test_import_aiofhir_loads_no_optional_extras() -> None:
     script = """
 import sys
 import aiofhir
@@ -14,8 +14,6 @@ import aiofhir
 def loaded(name: str) -> list[str]:
     return [mod for mod in sys.modules if mod == name or mod.startswith(name + ".")]
 
-assert loaded("livekit") == []
-assert loaded("fastapi") == []
 assert loaded("jwt") == []
 """
     completed = subprocess.run(

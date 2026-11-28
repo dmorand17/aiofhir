@@ -1,9 +1,8 @@
 # Getting started
 
-This guide signs a patient in with a standalone SMART launch and reads their
-medications. It runs in one process, which suits a local script or demo. For an
-agent in production, keep tokens in a backend instead; see
-[server-side token mode](server.md).
+This guide signs a patient in with a standalone SMART launch and searches their
+record. It runs in one process, which suits a local script or demo. In
+production, keep tokens in your backend.
 
 ## 1. Register an app
 
@@ -12,7 +11,8 @@ Register a SMART app on the FHIR server with:
 - a redirect URI your app serves, for example `http://localhost:8765/callback`;
 - the `authorization_code` grant, and `refresh_token` if you want long sessions;
 - the scopes the server offers. aiofhir derives the request from the server's
-  `.well-known/smart-configuration`; see [scopes](profiles.md#scopes).
+  `.well-known/smart-configuration` and, when that lists no wildcard scope, its
+  CapabilityStatement; see [scopes](profiles.md#scopes).
 
 ## 2. Start sign-in
 
@@ -53,35 +53,21 @@ from aiofhir.smart import RefreshingToken
 holder = RefreshingToken(smart, tokens)
 async with FhirClient(smart.base, holder, profile=smart.profile) as fhir:
     record = PatientRecord(fhir, patient_id=tokens.patient)
-    meds = await record.active_medications()
-    upcoming = await record.upcoming_appointments(days=30)
+    print(sorted(await record.searchable_types()))
+    meds = await record.search_raw("MedicationRequest", {"status": "active"})
 
-print(meds.to_text())
+for resource in meds.resources:
+    print(resource["id"], resource.get("status"))
 ```
 
-`RefreshingToken` refreshes the access token 60 seconds before it expires. Each
-helper returns a `Summary`; see [record helpers](helpers.md).
-
-## 5. Show it to a person
-
-`to_text()` is for a model: ISO dates in UTC and `Type/id` citations. For a
-person, format the same summary in their time zone:
-
-```python
-from aiofhir.display import format_summary
-
-print(format_summary(upcoming, tz="America/New_York"))
-```
-
-```text
-upcoming_appointments
-- «Annual checkup» Sat Nov 28, 2026, 10:07 PM EST (Appointment/a1)
-```
+`RefreshingToken` refreshes the access token 60 seconds before it expires. The
+types come from the server's CapabilityStatement; see
+[search and the FHIR client](search.md).
 
 ## Try it in Streamlit
 
-`examples/streamlit_app.py` runs this whole flow in a browser: sign-in, then
-every helper, each shown formatted for a person and as `to_text()` for a model.
+`examples/streamlit_app.py` runs this whole flow in a browser: sign-in, then a
+patient-scoped search of every type the server's CapabilityStatement supports.
 
 ```bash
 just demo        # http://localhost:8765, local only
@@ -96,8 +82,8 @@ installs.
 
 The app keeps `state` and the verifier in a server-side store keyed by `state`,
 because the browser returns from sign-in in a new Streamlit session. Tokens stay
-in that session's memory and are never shown. It is a local demo; agents should
-use [server-side token mode](server.md).
+in that session's memory and are never shown. It is a local demo; in production,
+keep tokens in your backend.
 
 ## Logging
 
@@ -105,7 +91,7 @@ Set `AIOFHIR_LOG_LEVEL` (for example `DEBUG`) to see aiofhir's logs without
 writing any logging code. It is read on `import aiofhir` and changes only the
 `aiofhir` logger:
 
-- In an app that configures logging (LiveKit Agents does), aiofhir's records go
+- In an app that configures logging, aiofhir's records go
   to the app's handlers, in its format, at that level. Nothing else changes.
 - In a script with no logging set up, aiofhir prints them to stderr itself, with
   ISO 8601 timestamps and the redaction filter below, until the app configures
@@ -113,7 +99,7 @@ writing any logging code. It is read on `import aiofhir` and changes only the
 - Unset, the library only has a `NullHandler`: nothing prints.
 
 ```bash
-AIOFHIR_LOG_LEVEL=DEBUG python my_agent.py
+AIOFHIR_LOG_LEVEL=DEBUG python my_app.py
 ```
 
 Scripts can instead

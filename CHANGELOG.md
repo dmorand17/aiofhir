@@ -7,27 +7,52 @@ change the API.
 
 ## [Unreleased]
 
+aiofhir is now a general SMART on FHIR client. Resource types come from the
+server's CapabilityStatement instead of a built-in list, and the
+resource-specific record helpers are gone.
+
+### Removed
+
+- **Breaking:** the ten record helpers (`upcoming_appointments`,
+  `active_medications`, `allergies`, `conditions`, `recent_labs`,
+  `immunizations`, `vital_signs`, `past_visits`, `procedures`, `documents`),
+  `Summary`, `Item`, `Citation`, `aiofhir.display`, the `Record` protocol and
+  `RECORD_HELPERS`. Use `PatientRecord.search_raw`.
+- **Breaking:** `RemoteRecord` and the `aiofhir[server]` extra.
+- **Breaking:** `ServerProfile.resolve_medication`, `code_text` and
+  `medication_reference_id`, which only the medication helper used.
+- **Breaking:** `aiofhir.smart.scopes.READ_RESOURCES`.
+
 ### Added
+
+- `aiofhir.capability`: `readable_types`, `patient_search_types` and
+  `fetch_capability_statement` read a server's CapabilityStatement.
+- `PatientRecord.searchable_types()`: the types `search_raw` accepts.
 
 - `AIOFHIR_LOG_LEVEL`: set it to see aiofhir's logs with no logging code. It
   changes only the `aiofhir` logger. Records go to the app's handlers when it has
   any; while it has none, aiofhir prints them to stderr, redacted.
 
 - `examples/streamlit_app.py` (`just demo`): a Streamlit app that signs a patient
-  in, shows their Patient resource and every helper (formatted for a person and
-  as `to_text()` for a model), and tries to open another patient to show aiofhir
-  and the server each refusing. Streamlit comes from a new `demo` dependency
+  in, shows their Patient resource and a patient-scoped search of each type the
+  server supports, and tries to open another patient to show aiofhir and the
+  server each refusing. Streamlit comes from a new `demo` dependency
   group.
 
 ### Changed
 
+- **Breaking:** `PatientRecord.search_raw` accepts the types the server's
+  CapabilityStatement lists with a `patient` search parameter, plus `Patient`,
+  instead of a fixed list of ten. It fetches `/metadata` once per `FhirClient`.
+  `PatientRecord` no longer takes `clock`.
+- When `scopes_supported` lists no wildcard scope, the scope asks for each type
+  the CapabilityStatement can read or search (and `scopes_supported` lists),
+  instead of a fixed list of eleven. `SmartClient` fetches `/metadata` only in
+  that case. `scopes_from_capabilities` and `system_scopes_from_capabilities`
+  take the types as `resources`.
 - A failed sign-in now says why. `TokenError` names the token endpoint's status,
   `error` and `error_description` (redacted), and the token endpoint's refusals
   are logged at INFO, including the `invalid_grant` behind `AuthExpired`.
-- The `aiofhir[server]` callback logs the reason for each failure: an unknown,
-  used or expired state; an error from the authorization server; a missing code;
-  a failed code exchange, with its cause; and a sign-in without a patient. It
-  still logs no tokens, codes, `state` or subjects.
 
 ## [0.1.1] - 2026-11-27
 

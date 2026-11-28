@@ -6,8 +6,7 @@ from importlib.metadata import version
 from aiofhir.client import FhirClient
 from aiofhir.errors import AuthExpired
 from aiofhir.log import apply_env_level
-from aiofhir.record import RECORD_HELPERS, PatientRecord, Record
-from aiofhir.remote import RemoteRecord
+from aiofhir.record import PatientRecord
 
 # Applications decide where logs go. AIOFHIR_LOG_LEVEL opts in to aiofhir's own
 # level (and a fallback handler while the app has none); unset, nothing changes.
@@ -17,11 +16,8 @@ apply_env_level()
 __version__ = version("aiofhir")
 
 __all__ = [
-    "RECORD_HELPERS",
     "AuthExpired",
     "FhirClient",
     "PatientRecord",
-    "Record",
-    "RemoteRecord",
     "__version__",
 ]

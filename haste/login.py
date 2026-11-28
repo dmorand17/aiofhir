@@ -1,4 +1,4 @@
-"""Browser sign-in and a printed record for the Haste smoke script."""
+"""Browser sign-in and a patient-scoped search report for the Haste smoke script."""
 
 from __future__ import annotations
 
@@ -12,8 +12,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from aiofhir import RECORD_HELPERS, FhirClient, PatientRecord
-from aiofhir.display import format_summary
+from aiofhir import FhirClient, PatientRecord
 from aiofhir.errors import TokenError
 from aiofhir.profiles import HasteProfile
 from aiofhir.scrub import scrub
@@ -25,7 +24,6 @@ REDIRECT_URI = "http://localhost:8765/callback"
 SEED_LOGIN_SCOPE = "user/*.cruds openid fhirUser"
 logger = logging.getLogger(__name__)
 Browser = Callable[[str], Awaitable[None] | None]
-_HELPERS = RECORD_HELPERS
 
 
 CALLBACK_TIMEOUT = 300.0
@@ -82,7 +80,7 @@ async def run_smoke(
     verifier: str,
     on_tokens: Callable[[TokenSet], Awaitable[None]] | None = None,
 ) -> str:
-    """Exchange a code, print every helper, and force one refresh.
+    """Exchange a code, search each patient-searchable type, and force one refresh.
 
     ``on_tokens`` receives the exchanged tokens and each rotated set after a refresh.
     """
@@ -105,16 +103,19 @@ async def run_smoke(
     async with FhirClient(base, holder, profile=HasteProfile()) as fhir:
         record = PatientRecord(fhir, patient_id=tokens.patient)
         sections = [f"patient: {tokens.patient}"]
-        for name in _HELPERS:
-            summary = await getattr(record, name)()
-            sections.append(format_summary(summary, tz="America/New_York"))
+        for resource in sorted(await record.searchable_types()):
+            result = await record.search_raw(resource)
+            line = f"{resource}: {len(result.resources)}"
+            if result.truncated or result.warnings:
+                line += f" (truncated={result.truncated}, warnings={len(result.warnings)})"
+            sections.append(line)
         logger.info("forcing one token refresh")
         await holder.refresh()
         if holder.tokens.patient != tokens.patient:
             raise SignInError("the refreshed token lost the patient context")
         sections.append("refresh: ok, patient kept")
     report = scrub("\n\n".join(sections))
-    logger.info("record helpers printed")
+    logger.info("search report printed")
     _reject_token(report, tokens.access_token)
     if tokens.refresh_token:
         _reject_token(report, tokens.refresh_token)
